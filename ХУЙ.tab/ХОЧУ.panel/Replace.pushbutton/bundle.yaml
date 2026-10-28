@@ -1,0 +1,6 @@
+title: "Как\nу тебя"
+tooltip: Замена элемента по образцу
+author: db
+version: 1.0.0
+description: Заменяет выбранный элемент на семейство-образец
+icon: icon.png

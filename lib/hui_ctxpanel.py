@@ -1,0 +1,262 @@
+# -*- coding: utf-8 -*-
+"""Панель «ХУЙ» на контекстной вкладке «Изменить | …» (как у ModPlus).
+
+Revit показывает вкладку «Изменить | <категория>» (Id «Modify»), когда что-то выделено.
+Через AdWindows добавляем туда свою панель с копиями наших кнопок. Кнопка запускает
+команду pyRevit так же, как с ленты: UIApplication.PostCommand(<Id кнопки>).
+Обработчик — свой ICommand (у копий родной обработчик Revit делает кнопки серыми): при нажатии
+находит такую же «живую» кнопку на вкладке ХУЙ и вызывает её родной обработчик — как щелчок мышью.
+PostCommand — только запасной путь (после Reload pyRevit для части кнопок молча не срабатывал).
+Ставится из startup.py (ensure — раз в 3 с проверяет, что панель на месте).
+
+    import hui_ctxpanel
+    hui_ctxpanel.install(uiapp)          # из startup.py
+"""
+import clr
+clr.AddReference('AdWindows')
+clr.AddReference('PresentationCore')
+from System.Windows.Input import ICommand
+import Autodesk.Windows as aw
+from Autodesk.Revit.UI import RevitCommandId
+
+PANEL_ID = u'HUI_ctx'
+TAB_ID = u'Modify'
+HUI_TAB = u'ХУЙ'
+# какие кнопки (окончание Id «...%<папка кнопки>»), по порядку
+BUTTONS = (u'Analis', u'WhoFilter', u'TypeFilter', u'Align', u'MEPAlign')
+# панель «Оформить» (17.10.2026): малые кнопки без подписи, стопками по 3 (как у ModPlus)
+COMPACT = ((u'Stack', u'Snap', u'Spread'), (u'Reset', u'Reverse', u'AlignV'),
+           (u'AlignH', u'Measure', u'Merge'), (u'NumClick', u'NumClock', u'Straight'))
+COMPACT_PANEL = (u'Оформить', u'Пиздато')   # название панели (17.10.2026 → «Пиздато»)
+
+
+def _walk(items):
+    """Все кнопки, в т.ч. внутри стопок (RibbonRowPanel) и выпадающих."""
+    for it in items:
+        yield it
+        sub = getattr(it, 'Items', None)
+        if sub is not None:
+            try:
+                for x in _walk(sub):
+                    yield x
+            except Exception:
+                pass
+
+
+def compact(uiapp=None):
+    """Убрать подписи у кнопок панели «Оформить» на вкладке ХУЙ — только значки."""
+    hui = _tab(title=HUI_TAB)
+    if hui is None:
+        return 0
+    n = 0
+    for p in _live_panels(hui):
+        if p.Source is None or p.Source.Title not in COMPACT_PANEL:
+            continue
+        for it in _walk(p.Source.Items):
+            if isinstance(it, aw.RibbonButton) and it.ShowText:
+                it.ShowText = False
+                n += 1
+    return n
+
+_keep = []      # держим ссылки, чтобы сборщик мусора не удалил обработчики
+
+
+def _log(msg):
+    try:
+        import io, os, tempfile
+        with io.open(os.path.join(tempfile.gettempdir(), u'hui_ctxpanel_log.txt'), 'a', encoding='utf-8') as f:
+            f.write(u'%s\n' % msg)
+    except Exception:
+        pass
+
+
+class _Post(ICommand):
+    """Запуск команды по её Id (Id кнопки pyRevit)."""
+    def __init__(self, uiapp):
+        self.uiapp = uiapp
+
+    def add_CanExecuteChanged(self, handler):
+        pass
+
+    def remove_CanExecuteChanged(self, handler):
+        pass
+
+    def CanExecute(self, parameter):
+        return True
+
+    def Execute(self, parameter):
+        # AdWindows передаёт сюда саму кнопку (RibbonButton), Id команды — в её CommandParameter
+        try:
+            cmd_id = getattr(parameter, 'CommandParameter', None) or parameter
+            # 1) как обычное нажатие: живая кнопка на вкладке ХУЙ и её родной обработчик Revit
+            #    (PostCommand после Reload pyRevit для части кнопок молча не срабатывал)
+            orig = _find_live(u'%s' % cmd_id)
+            if orig is not None and orig.CommandHandler is not None:
+                h = orig.CommandHandler
+                if h.CanExecute(orig):
+                    h.Execute(orig)
+                    return
+            cid = RevitCommandId.LookupCommandId(u'%s' % cmd_id)
+            if cid is None:
+                _log(u'нет команды %s' % cmd_id)
+                return
+            if hasattr(self.uiapp, 'PostCommand'):
+                self.uiapp.PostCommand(cid)
+        except Exception as ex:
+            _log(u'ошибка: %s' % ex)
+
+
+def _find_live(cmd_id):
+    hui = _tab(title=HUI_TAB)
+    if hui is None:
+        return None
+    for p in _live_panels(hui):
+        for it in _walk(p.Source.Items):
+            if it.Id == cmd_id:
+                return it
+    return None
+
+
+def _live_panels(tab):
+    """Панели вкладки, видимые на ленте. После Reload pyRevit старые панели (до
+    переименования) остаются скрытыми до перезапуска Revit — их кнопки не брать."""
+    return [p for p in tab.Panels if p.Source is not None and p.IsVisible]
+
+
+def _tab(tid=None, title=None):
+    for t in aw.ComponentManager.Ribbon.Tabs:
+        if (tid and t.Id == tid) or (title and t.Title == title):
+            return t
+    return None
+
+
+def ensure(uiapp):
+    """Поставить панель, если её нет (вызывать по таймеру: вкладка ХУЙ появляется не сразу)."""
+    mod = _tab(TAB_ID)
+    if mod is None or _tab(title=HUI_TAB) is None:
+        return False
+    try:
+        compact()
+    except Exception as ex:
+        _log(u'compact: %s' % ex)
+    for p in mod.Panels:
+        if p.Source is not None and p.Source.Id == PANEL_ID:
+            # панель поставлена раньше, чем появились кнопки «Оформить», — переставить
+            have = set(getattr(it, 'Id', None) for it in _walk(p.Source.Items))
+            if u'HUI_ctx_' + COMPACT[0][0] not in have and _has_live(COMPACT[0][0]):
+                return install(uiapp) > 0
+            _sync(p.Source)
+            return True
+    return install(uiapp) > 0
+
+
+def _sync(src):
+    """Подписи и подсказки копий — как у живых кнопок (после Reload заголовок мог смениться)."""
+    try:
+        for it in _walk(src.Items):
+            cp = getattr(it, 'CommandParameter', None)
+            if not cp:
+                continue
+            o = _find_live(u'%s' % cp)
+            if o is not None and o.Text != it.Text:
+                it.Text = o.Text
+                it.ToolTip = o.ToolTip if o.ToolTip is not None else o.Text
+                it.Image = o.Image
+                it.LargeImage = o.LargeImage
+    except Exception as ex:
+        _log(u'sync: %s' % ex)
+
+
+def _has_live(name):
+    hui = _tab(title=HUI_TAB)
+    if hui is None:
+        return False
+    for p in _live_panels(hui):
+        for it in _walk(p.Source.Items):
+            if (getattr(it, 'Id', None) or u'').endswith(u'%' + name):
+                return True
+    return False
+
+
+def remove():
+    mod = _tab(TAB_ID)
+    if mod is None:
+        return 0
+    old = [p for p in mod.Panels if p.Source is not None and p.Source.Id == PANEL_ID]
+    for p in old:
+        mod.Panels.Remove(p)
+    return len(old)
+
+
+def install(uiapp, buttons=BUTTONS):
+    """Поставить (или переставить) панель. Возвращает число кнопок."""
+    mod = _tab(TAB_ID)
+    hui = _tab(title=HUI_TAB)
+    if mod is None or hui is None:
+        return 0
+    remove()
+    found = {}
+    names = list(buttons) + [b for g in COMPACT for b in g]
+    for p in _live_panels(hui):
+        for it in _walk(p.Source.Items):
+            iid = getattr(it, 'Id', None) or u''
+            for b in names:
+                if iid.endswith(u'%' + b):
+                    found[b] = it
+    cmd = _Post(uiapp)
+    _keep.append(cmd)
+    src = aw.RibbonPanelSource()
+    src.Title = HUI_TAB
+    src.Id = PANEL_ID
+    n = 0
+    for b in buttons:
+        o = found.get(b)
+        if o is None:
+            continue
+        nb = aw.RibbonButton()
+        nb.Id = u'HUI_ctx_' + b
+        nb.Text = o.Text
+        nb.Image = o.Image
+        nb.LargeImage = o.LargeImage
+        nb.ToolTip = o.ToolTip
+        nb.Size = o.Size
+        nb.Orientation = o.Orientation
+        nb.ShowText = True
+        nb.ShowImage = True
+        nb.CommandHandler = cmd
+        nb.CommandParameter = o.Id
+        nb.IsEnabled = True
+        src.Items.Add(nb)
+        n += 1
+    # стопки малых кнопок «Оформить» — только значки
+    for grp in COMPACT:
+        rp = aw.RibbonRowPanel()
+        k = 0
+        for b in grp:
+            o = found.get(b)
+            if o is None:
+                continue
+            if k:
+                rp.Items.Add(aw.RibbonRowBreak())
+            nb = aw.RibbonButton()
+            nb.Id = u'HUI_ctx_' + b
+            nb.Text = o.Text
+            nb.Image = o.Image
+            nb.LargeImage = o.LargeImage
+            nb.ToolTip = o.ToolTip if o.ToolTip is not None else o.Text
+            nb.Size = aw.RibbonItemSize.Standard
+            nb.ShowText = False
+            nb.ShowImage = True
+            nb.CommandHandler = cmd
+            nb.CommandParameter = o.Id
+            nb.IsEnabled = True
+            rp.Items.Add(nb)
+            k += 1
+            n += 1
+        if k:
+            src.Items.Add(rp)
+    pan = aw.RibbonPanel()
+    pan.Source = src
+    mod.Panels.Add(pan)
+    _keep.append(pan)
+    return n

@@ -1,0 +1,7 @@
+title: "Блядь"
+layout:
+  - Analis
+  - WhoFilter
+  - TypeFilter
+  - Tag
+  - Untagged

@@ -1,0 +1,11 @@
+# pyRevit / Python
+__pycache__/
+*.pyc
+# рабочие и резервные файлы
+zb_tmp/
+*.bak*
+_backup*/
+_archive/
+Claude outputs/
+# карантин — не публикуется
+ХУЙ.tab/Отстойник.panel/
