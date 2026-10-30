@@ -1,5 +1,7 @@
 # XYZ — плагин pyRevit для проектировщиков ОВиК
 
+🇬🇧 [English version](README_en.md)
+
 > **EN:** pyRevit extension with MEP tools for Revit (tags, schematics, plenum families, ESKD sketches, schedules, sheet export). Russian and English UI.
 
 ![XYZ](docs/img/icons_bg/XYZ.png)
