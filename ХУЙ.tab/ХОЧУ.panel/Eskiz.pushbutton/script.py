@@ -917,14 +917,6 @@ def _draw_cube(it, Wd):
     def sp(p):
         r = _proj(p)
         return Point(ox + r[0] * h, oy + r[1] * h)
-    # кольцо (компас) под кубом
-    ring = Polygon()
-    for i in range(48):
-        a_ = 2 * math.pi * i / 48
-        ring.Points.Add(sp(E.vadd(E.vmul(U, -1.0), E.vmul(R, 1.75 * math.cos(a_)), E.vmul(N, 1.75 * math.sin(a_)))))
-    ring.Fill = _shade((225, 232, 228), 1.0, 120)
-    ring.Stroke, ring.StrokeThickness, ring.IsHitTestVisible = B(u'#A9B6AE'), 3.0, False
-    cv3.Children.Add(ring)
     groups = {}
     labels = []
     for k in keys:
@@ -937,8 +929,8 @@ def _draw_cube(it, Wd):
             face = Polygon()
             for a_, b_ in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
                 face.Points.Add(sp(P({k: sg, o1: a_, o2: b_})))
-            face.Fill = _shade((238, 242, 240), 0.75 + 0.25 * fc, 255)
-            face.Stroke, face.StrokeThickness, face.IsHitTestVisible = B(u'#8E9C93'), 0.8, False
+            face.Fill = _shade((236, 241, 238), 0.62 + 0.38 * fc, 255)   # грани заметно разной яркости (db 30.10)
+            face.Stroke, face.StrokeThickness, face.IsHitTestVisible = B(u'#55635A'), 1.3, False
             cv3.Children.Add(face)
             if fc > 0.3:
                 labels.append((sp(n), names[(k, sg)], fc))
@@ -978,14 +970,7 @@ def _draw_cube(it, Wd):
         Canvas.SetLeft(tb, q.X - tb.DesiredSize.Width / 2.0)
         Canvas.SetTop(tb, q.Y - tb.DesiredSize.Height / 2.0)
         cv3.Children.Add(tb)
-    # «домик» — исходный вид (изометрия спереди-справа-сверху)
-    home = TextBlock()
-    home.Text, home.FontSize, home.Cursor, home.ToolTip = u'⌂', 15, Cursors.Hand, u'Исходный вид (изометрия)'
-    home.Foreground = B(u'#5B6B61')
-    home.Tag = ('cube', E.vadd(N, R, U))
-    Canvas.SetLeft(home, ox - 48)
-    Canvas.SetTop(home, oy - 46)
-    cv3.Children.Add(home)
+
 
 
 def on3_down(s_, e_):
