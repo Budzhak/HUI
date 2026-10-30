@@ -23,7 +23,7 @@
 После установки запустите Revit — на ленте появится вкладка **pyRevit**.
 
 **2. ХУЙ.** Один из двух способов:
-- **Через менеджер расширений pyRevit.** pyRevit → **Расширения** (Extensions) → внизу в поле «URL Git» вставьте `https://github.com/Budzhak/HUI.git` → **Добавить и установить**. Пока репозиторий закрытый, в поле «Токен» нужен personal access token GitHub с правом чтения.
+- **Через менеджер расширений pyRevit.** pyRevit → **Расширения** (Extensions) → внизу в поле «URL Git» вставьте `https://github.com/Budzhak/HUI.git` → **Добавить и установить**.
 - **Вручную.** Вверху этой страницы: **Code → Download ZIP**. Распакуйте архив в `%APPDATA%\pyRevit\Extensions\` и переименуйте папку `HUI-main` в `HUI.extension`.
 
 **3. Запуск.** pyRevit → **Reload**. Вкладка «ХУЙ» появится сразу после «Вставить».
