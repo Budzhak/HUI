@@ -109,8 +109,12 @@ def cam_vecs():
     """Ракурс 3D-вида окна (раздел 2) в координатах изделия: (вправо, вверх, к зрителю) — им же строится аксонометрия."""
     v3 = globals().get('V3') or {'yaw': float(CFG.get('yaw', -35.0)), 'pitch': float(CFG.get('pitch', 25.0))}
     a, b = math.radians(v3['yaw']), math.radians(v3['pitch'])
-    return ((math.cos(a), -math.sin(a), 0.0),
-            (math.sin(b) * math.sin(a), math.sin(b) * math.cos(a), math.cos(b)),
+    r = math.radians(v3.get('roll', float(CFG.get('roll', 0.0))))
+    rs = (math.cos(a), -math.sin(a), 0.0)
+    us = (math.sin(b) * math.sin(a), math.sin(b) * math.cos(a), math.cos(b))
+    cr, sr = math.cos(r), math.sin(r)
+    return (tuple([cr * rs[i] - sr * us[i] for i in range(3)]),
+            tuple([sr * rs[i] + cr * us[i] for i in range(3)]),
             (-math.cos(b) * math.sin(a), -math.cos(b) * math.cos(a), math.sin(b)))
 
 
@@ -682,20 +686,31 @@ def refresh(*a):
 
 
 AUTO_RU = {'in': u'вход', 'out': u'выход', None: u'не определено'}
-V3 = {'yaw': float(CFG.get('yaw', -35.0)), 'pitch': float(CFG.get('pitch', 25.0)), 'zoom': 1.0, 'drag': None}
+V3 = {'yaw': float(CFG.get('yaw', -35.0)), 'pitch': float(CFG.get('pitch', 25.0)), 'roll': float(CFG.get('roll', 0.0)),
+      'zoom': 1.0, 'drag': None}
 
 
 def set_cam(d):
     """Видовой куб: взгляд из направления d (к зрителю, координаты изделия)."""
     d = E.unit(d)
     V3['pitch'] = max(-89.0, min(89.0, math.degrees(math.asin(max(-1.0, min(1.0, d[2]))))))
+    V3['roll'] = 0.0
     if abs(d[0]) + abs(d[1]) > 1e-6:
         V3['yaw'] = math.degrees(math.atan2(-d[0], -d[1]))
+    elif W.get('cur') is not None:                   # строго сверху/снизу — главный вид («Спереди») внизу, как в Revit
+        N_ = _basis_of(W['cur'])[2]
+        V3['yaw'] = math.degrees(math.atan2(-N_[0], -N_[1]))
+    cam_changed()
+
+
+def roll_cam(deg):
+    """Стрелки у куба: повернуть картинку на 90° по / против часовой (как в Revit)."""
+    V3['roll'] = (V3.get('roll', 0.0) + deg) % 360.0
     cam_changed()
 
 
 def cam_changed():
-    CFG['yaw'], CFG['pitch'] = V3['yaw'], V3['pitch']
+    CFG['yaw'], CFG['pitch'], CFG['roll'] = V3['yaw'], V3['pitch'], V3.get('roll', 0.0)
     save_cfg()
     draw3d()
     if CFG.get('axo_mode', 'free') == 'free':
@@ -714,7 +729,10 @@ def _proj(p):
     y1 = x * math.sin(a) + y * math.cos(a)
     y2 = y1 * math.cos(b) - z * math.sin(b)
     z2 = y1 * math.sin(b) + z * math.cos(b)
-    return x1, -z2, y2
+    r = math.radians(V3.get('roll', 0.0))             # поворот картинки в плоскости экрана (стрелки ↻ ↺)
+    xr = x1 * math.cos(r) - z2 * math.sin(r)
+    zr = x1 * math.sin(r) + z2 * math.cos(r)
+    return xr, -zr, y2
 
 
 def _facing(n):
@@ -970,6 +988,31 @@ def _draw_cube(it, Wd):
         Canvas.SetLeft(tb, q.X - tb.DesiredSize.Width / 2.0)
         Canvas.SetTop(tb, q.Y - tb.DesiredSize.Height / 2.0)
         cv3.Children.Add(tb)
+    # стрелки, как в Revit: ↻ ↺ — повернуть картинку на 90°; когда смотрим строго на грань — ▲▼◀▶ на соседнюю грань
+    def arrow(text, x, y, tag, tip, size=15):
+        tb_ = TextBlock()
+        tb_.Text, tb_.FontSize, tb_.Foreground, tb_.Cursor, tb_.ToolTip = text, size, B(u'#4E5D54'), Cursors.Hand, tip
+        tb_.Tag = tag
+
+        def on_in(s_, e_):
+            s_.Foreground = B(u'#1E88E5')
+
+        def on_out(s_, e_):
+            s_.Foreground = B(u'#4E5D54')
+        tb_.MouseEnter += on_in
+        tb_.MouseLeave += on_out
+        Canvas.SetLeft(tb_, x)
+        Canvas.SetTop(tb_, y)
+        cv3.Children.Add(tb_)
+    arrow(u'↻', ox + 26, oy - 44, ('roll', -90.0), u'Повернуть вид на 90° по часовой')
+    arrow(u'↺', ox - 40, oy - 44, ('roll', 90.0), u'Повернуть вид на 90° против часовой')
+    cam = cam_vecs()
+    if max([abs(_facing(E.vmul(ax[k], 1))) for k in keys]) > 0.995:
+        rs, us = cam[0], cam[1]
+        arrow(u'▲', ox - 5, oy - 50, ('cube', us), u'Соседняя грань сверху', 11)
+        arrow(u'▼', ox - 5, oy + 34, ('cube', E.vmul(us, -1)), u'Соседняя грань снизу', 11)
+        arrow(u'◀', ox - 50, oy - 8, ('cube', E.vmul(rs, -1)), u'Соседняя грань слева', 11)
+        arrow(u'▶', ox + 38, oy - 8, ('cube', rs), u'Соседняя грань справа', 11)
 
 
 
@@ -1004,6 +1047,9 @@ def on3_up(s_, e_):
     i = getattr(src, 'Tag', None) if isinstance(src, (Polygon, TextBlock)) else None
     if isinstance(i, tuple) and i and i[0] == 'cube':
         set_cam(i[1])                            # видовой куб
+        return
+    if isinstance(i, tuple) and i and i[0] == 'roll':
+        roll_cam(i[1])                           # стрелки ↻ ↺
         return
     tags = W.get('tags') or []
     if not isinstance(i, int) or not (0 <= i < len(tags)):
