@@ -898,79 +898,94 @@ def _basis_of(it):
 
 
 def _draw_cube(it, Wd):
-    """Видовой куб как в Revit: куб со скошенными рёбрами и углами — 6 граней (вид спереди…снизу), 12 фасок-рёбер
-    (вид под 45°), 8 треугольников-углов (изометрия); каждое направление — один элемент. Крутится вместе с
-    моделью, стороны — относительно главного вида. db 30.10."""
+    """Видовой куб как в Revit (db 30.10): светлый куб с подписями граней без лишних линий; активные зоны —
+    середина грани, полоса у ребра, уголок — подсвечиваются голубым целиком (ребро — на обеих гранях, угол —
+    на трёх); щелчок — точный вид (6 + 12 + 8). Под кубом — кольцо, рядом — «домик» (исходный вид).
+    Стороны — относительно главного вида."""
     R, U, N = _basis_of(it)
     ax = {'R': R, 'U': U, 'N': N}
-    names = {('N', 1): u'Спереди', ('N', -1): u'Сзади', ('R', 1): u'Справа', ('R', -1): u'Слева',
-             ('U', 1): u'Сверху', ('U', -1): u'Снизу'}
-    t = 0.26
-    m = 1.0 - t
-    h = 24.0
-    ox, oy = Wd - 46.0, 46.0
+    names = {('N', 1): u'СПЕРЕДИ', ('N', -1): u'СЗАДИ', ('R', 1): u'СПРАВА', ('R', -1): u'СЛЕВА',
+             ('U', 1): u'СВЕРХУ', ('U', -1): u'СНИЗУ'}
+    keys = ['R', 'U', 'N']
+    h = 22.0
+    ox, oy = Wd - 50.0, 50.0
+    BAND = 0.7                                    # граница зоны ребра/угла (доля полуребра)
 
-    def P(c):                                     # c — {'R': x, 'U': y, 'N': z} в долях полуребра
+    def P(c):
         return E.vadd(E.vmul(R, c.get('R', 0)), E.vmul(U, c.get('U', 0)), E.vmul(N, c.get('N', 0)))
 
     def sp(p):
         r = _proj(p)
         return Point(ox + r[0] * h, oy + r[1] * h)
-    pieces = []
-    keys = ['R', 'U', 'N']
-    for k in keys:                                # грани
+    # кольцо (компас) под кубом
+    ring = Polygon()
+    for i in range(48):
+        a_ = 2 * math.pi * i / 48
+        ring.Points.Add(sp(E.vadd(E.vmul(U, -1.0), E.vmul(R, 1.75 * math.cos(a_)), E.vmul(N, 1.75 * math.sin(a_)))))
+    ring.Fill = _shade((225, 232, 228), 1.0, 120)
+    ring.Stroke, ring.StrokeThickness, ring.IsHitTestVisible = B(u'#A9B6AE'), 3.0, False
+    cv3.Children.Add(ring)
+    groups = {}
+    labels = []
+    for k in keys:
         o1, o2 = [x for x in keys if x != k]
         for sg in (1, -1):
-            pts = [P({k: sg, o1: a * m, o2: b * m}) for a, b in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
-            pieces.append((pts, E.vmul(ax[k], sg), u'грань', names[(k, sg)], (236, 242, 238)))
-    for i, k1 in enumerate(keys):                 # фаски рёбер
-        for k2 in keys[i + 1:]:
-            w = [x for x in keys if x not in (k1, k2)][0]
-            for s1 in (1, -1):
-                for s2 in (1, -1):
-                    pts = [P({k1: s1, k2: s2 * m, w: -m}), P({k1: s1, k2: s2 * m, w: m}),
-                           P({k1: s1 * m, k2: s2, w: m}), P({k1: s1 * m, k2: s2, w: -m})]
-                    d = E.vadd(E.vmul(ax[k1], s1), E.vmul(ax[k2], s2))
-                    pieces.append((pts, d, u'ребро', names[(k1, s1)] + u' / ' + names[(k2, s2)], (212, 224, 216)))
-    for sr in (1, -1):                            # углы
-        for su in (1, -1):
-            for sn in (1, -1):
-                sg = {'R': sr, 'U': su, 'N': sn}
-                pts = [P(dict((x, sg[x] * (1.0 if x == y else m)) for x in keys)) for y in keys]
-                d = E.vadd(E.vmul(R, sr), E.vmul(U, su), E.vmul(N, sn))
-                pieces.append((pts, d, u'угол', u'изометрия', (200, 214, 205)))
-    for pts, d, kind, name, rgb in pieces:
-        fc = _facing(E.unit(d))
-        if fc <= 0.01:
-            continue
-        pg = Polygon()
-        for q in pts:
-            pg.Points.Add(sp(q))
-        pg.Fill = _shade(rgb, 0.6 + 0.4 * fc, 255)
-        pg.Stroke, pg.StrokeThickness = B(u'#7A8A80'), 0.7
-        pg.Tag = ('cube', d)
-        pg.Cursor = Cursors.Hand
-        pg.ToolTip = u'%s: %s' % (kind.capitalize(), name)
+            n = E.vmul(ax[k], sg)
+            fc = _facing(n)
+            if fc <= 0.01:
+                continue
+            face = Polygon()
+            for a_, b_ in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+                face.Points.Add(sp(P({k: sg, o1: a_, o2: b_})))
+            face.Fill = _shade((238, 242, 240), 0.75 + 0.25 * fc, 255)
+            face.Stroke, face.StrokeThickness, face.IsHitTestVisible = B(u'#8E9C93'), 0.8, False
+            cv3.Children.Add(face)
+            if fc > 0.3:
+                labels.append((sp(n), names[(k, sg)], fc))
+            # активные зоны 3×3 (без линий): середина — грань, полосы — рёбра, уголки — углы
+            rng = {-1: (-1.0, -BAND), 0: (-BAND, BAND), 1: (BAND, 1.0)}
+            for i in (-1, 0, 1):
+                for j in (-1, 0, 1):
+                    zone = Polygon()
+                    for a_, b_ in ((0, 0), (1, 0), (1, 1), (0, 1)):
+                        zone.Points.Add(sp(P({k: sg, o1: rng[i][a_], o2: rng[j][b_]})))
+                    zone.Fill = _shade((255, 255, 255), 1.0, 1)        # прозрачная, но ловит мышь
+                    d = E.vadd(n, E.vmul(ax[o1], i), E.vmul(ax[o2], j))
+                    key_ = tuple(int(round(x)) for x in d)
+                    zone.Tag = ('cube', d)
+                    zone.Cursor = Cursors.Hand
+                    kind = u'Вид ' + names[(k, sg)].lower() if not (i or j) else (u'Ребро' if not (i and j) else u'Угол — изометрия')
+                    zone.ToolTip = kind
+                    groups.setdefault(key_, []).append(zone)
+    hl = B(u'#9CC7EE')
 
-        def on_in(s_, e_, pg=pg):
-            W['cube_hl'] = (pg, pg.Fill)
-            pg.Fill = _shade(RGB_HL, 1.0, 255)
+    def on_in(s_, e_, key_=None):
+        for z in groups.get(s_.Tag and tuple(int(round(x)) for x in s_.Tag[1]), []):
+            z.Fill = hl
 
-        def on_out(s_, e_, pg=pg):
-            hl = W.get('cube_hl')
-            if hl and hl[0] is pg:
-                pg.Fill = hl[1]
-        pg.MouseEnter += on_in
-        pg.MouseLeave += on_out
-        cv3.Children.Add(pg)
-        if kind == u'грань' and fc > 0.35:
-            q = sp(E.vmul(E.unit(d), 1.0))
-            tb = TextBlock()
-            tb.Text, tb.FontSize, tb.Foreground, tb.IsHitTestVisible = name, 8, B(u'#33413A'), False
-            tb.Measure(System.Windows.Size(200, 50))
-            Canvas.SetLeft(tb, q.X - tb.DesiredSize.Width / 2.0)
-            Canvas.SetTop(tb, q.Y - tb.DesiredSize.Height / 2.0)
-            cv3.Children.Add(tb)
+    def on_out(s_, e_):
+        for z in groups.get(tuple(int(round(x)) for x in s_.Tag[1]), []):
+            z.Fill = _shade((255, 255, 255), 1.0, 1)
+    for zs in groups.values():
+        for z in zs:
+            z.MouseEnter += on_in
+            z.MouseLeave += on_out
+            cv3.Children.Add(z)
+    for q, name, fc in labels:
+        tb = TextBlock()
+        tb.Text, tb.FontSize, tb.Foreground, tb.IsHitTestVisible = name, 7.5, B(u'#3C4A42'), False
+        tb.Measure(System.Windows.Size(200, 50))
+        Canvas.SetLeft(tb, q.X - tb.DesiredSize.Width / 2.0)
+        Canvas.SetTop(tb, q.Y - tb.DesiredSize.Height / 2.0)
+        cv3.Children.Add(tb)
+    # «домик» — исходный вид (изометрия спереди-справа-сверху)
+    home = TextBlock()
+    home.Text, home.FontSize, home.Cursor, home.ToolTip = u'⌂', 15, Cursors.Hand, u'Исходный вид (изометрия)'
+    home.Foreground = B(u'#5B6B61')
+    home.Tag = ('cube', E.vadd(N, R, U))
+    Canvas.SetLeft(home, ox - 48)
+    Canvas.SetTop(home, oy - 46)
+    cv3.Children.Add(home)
 
 
 def on3_down(s_, e_):
@@ -1001,7 +1016,7 @@ def on3_up(s_, e_):
         cam_changed()                            # 30.10 db: повернули 3D — аксонометрия под тем же углом
         return                                   # тянули — поворот, не щелчок
     src = V3.get('src')
-    i = getattr(src, 'Tag', None) if isinstance(src, Polygon) else None
+    i = getattr(src, 'Tag', None) if isinstance(src, (Polygon, TextBlock)) else None
     if isinstance(i, tuple) and i and i[0] == 'cube':
         set_cam(i[1])                            # видовой куб
         return
