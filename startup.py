@@ -127,6 +127,17 @@ def _has_icon(panel):
 _done = {'icon': False, 'ctx': False, 'tab': False, 'n': 0}
 
 
+def _restart_timer(*args):
+    try:
+        _done['icon'] = False
+        _done['n'] = 0
+        tm = AppDomain.CurrentDomain.GetData(KEY)
+        if tm is not None and not tm.IsEnabled:
+            tm.Start()
+    except Exception:
+        _log('restart timer: ' + traceback.format_exc())
+
+
 def ensure_icon(*args):
     try:
         panel = _state['panel']
@@ -155,6 +166,10 @@ def ensure_icon(*args):
             panel.Orientation = Orientation.Horizontal
         panel.Children.Insert(0, img)
         _done['icon'] = True
+        try:
+            panel.Unloaded += _restart_timer   # Revit пересоздал заголовок (сворачивание ленты, тема) — проверить снова
+        except Exception:
+            pass
     except Exception:
         _log(traceback.format_exc())
 
