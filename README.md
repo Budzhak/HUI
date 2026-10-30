@@ -1,10 +1,10 @@
-# ХУЙ — плагин pyRevit
+# ХУЙ вам, проектировщики.
 
 > **EN:** pyRevit extension with MEP tools for Revit (tags, schematics, plenum families, ESKD sketches, schedules, sheet export). The interface is in Russian; an English UI is planned.
 
 ![ХУЙ](docs/img/icons_bg/ХУЙ.png)
 
-## ХУЙ вам, проектировщики.
+## ХУЙ — плагин pyRevit
 
 Чтобы рутина в Revit не омрачала ваше настроение, используйте ХУЙ. ХУЙ да не ХУЙ(я), но всё же хуже без ХУЙ(я).
 
