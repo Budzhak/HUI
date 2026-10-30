@@ -1,5 +1,9 @@
-title: "Конец в середину"
-tooltip: "Конец выноски выделенных марок (или марок выделенных элементов) — в центр своего элемента."
+title:
+  ru: Конец в середину
+  en_us: Center Leader
+tooltip:
+  ru: Конец выноски выделенных марок (или марок выделенных элементов) — в центр своего элемента.
+  en_us: Moves the leader end of the selected tags (or tags of the selected elements) to the center of their element.
 author: db
 version: 1.0.0
 icon: icon.png

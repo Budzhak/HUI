@@ -1,5 +1,9 @@
-title: "Как\nу тебя"
-tooltip: Замена элемента по образцу
+title:
+  ru: "Как\nу тебя"
+  en_us: "Replace\nby Sample"
+tooltip:
+  ru: Замена элемента по образцу
+  en_us: Replaces an element with the type of a sample element, keeping its insertion point, level and offset.
 author: db
 version: 1.0.0
 description: Заменяет выбранный элемент на семейство-образец

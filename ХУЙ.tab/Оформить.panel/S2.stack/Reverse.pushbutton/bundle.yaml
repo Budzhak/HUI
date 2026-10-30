@@ -1,5 +1,9 @@
-title: "Реверс"
-tooltip: "Поменять местами выделенные марки в обратном порядке (строки колонки, ряд)."
+title:
+  ru: Реверс
+  en_us: Reverse
+tooltip:
+  ru: Поменять местами выделенные марки в обратном порядке (строки колонки, ряд).
+  en_us: Reverses the order of the selected tags (column rows or a row).
 author: db
 version: 1.0.0
 icon: icon.png

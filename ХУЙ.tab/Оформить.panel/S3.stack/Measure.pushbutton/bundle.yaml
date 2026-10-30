@@ -1,5 +1,9 @@
-title: "Измерить шаг"
-tooltip: "Средний шаг между выделенными марками — запоминается и подставляется в «Друг под другом» / «Рядом»."
+title:
+  ru: Измерить шаг
+  en_us: Measure Spacing
+tooltip:
+  ru: Средний шаг между выделенными марками — запоминается и подставляется в «Друг под другом» / «Рядом».
+  en_us: Measures the average spacing between the selected tags and stores it for Align Vertical / Align Horizontal.
 author: db
 version: 1.0.0
 icon: icon.png

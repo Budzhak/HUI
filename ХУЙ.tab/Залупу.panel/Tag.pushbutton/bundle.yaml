@@ -1,5 +1,9 @@
-title: Пометить
-tooltip: Декларировать выбранные элементы в спеке
+title:
+  ru: Пометить
+  en_us: Mark
+tooltip:
+  ru: Декларировать выбранные элементы в спеке
+  en_us: Writes a mark into a parameter of the selected elements and creates a schedule filtered by it.
 author: db
 version: 1.0.0
 icon: icon.png

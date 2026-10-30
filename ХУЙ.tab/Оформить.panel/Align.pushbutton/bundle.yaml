@@ -1,5 +1,9 @@
-title: "По\nкрасоте"
-tooltip: Выравнивание как надо
+title:
+  ru: "По\nкрасоте"
+  en_us: "Tag\nTools"
+tooltip:
+  ru: Выравнивание как надо
+  en_us: 'Tag tools: align tags, tag columns, reset tags, elevation marks on exploded schemes. Experimental modes ask for confirmation.'
 author: db
 version: 1.0.0
 description: Выраваниваем марки по красоте

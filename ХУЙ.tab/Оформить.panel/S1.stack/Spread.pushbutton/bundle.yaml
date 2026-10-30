@@ -1,5 +1,9 @@
-title: "Равный шаг"
-tooltip: "Концы выносок выделенных марок — с равным шагом вдоль оси своего элемента; вертикальные участки остаются вертикальными."
+title:
+  ru: Равный шаг
+  en_us: Even Spacing
+tooltip:
+  ru: Концы выносок выделенных марок — с равным шагом вдоль оси своего элемента; вертикальные участки остаются вертикальными.
+  en_us: Spaces the leader ends of the selected tags evenly along their element's axis; vertical segments stay vertical.
 author: db
 version: 1.0.0
 icon: icon.png

@@ -1,5 +1,9 @@
-title: Распознать
-tooltip: Список выбранных элементов
+title:
+  ru: Распознать
+  en_us: Identify
+tooltip:
+  ru: Список выбранных элементов
+  en_us: Lists the selected elements by type, with previews.
 author: db
 version: 1.0.0
 icon: icon.png

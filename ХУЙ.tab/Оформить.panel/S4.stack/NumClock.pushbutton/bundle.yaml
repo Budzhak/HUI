@@ -1,5 +1,9 @@
-title: "Нумерация по часовой"
-tooltip: "Номера выделенных марок по часовой стрелке."
+title:
+  ru: Нумерация по часовой
+  en_us: Clockwise Numbering
+tooltip:
+  ru: Номера выделенных марок по часовой стрелке.
+  en_us: Numbers the selected tags clockwise.
 author: db
 version: 1.0.0
 icon: icon.png

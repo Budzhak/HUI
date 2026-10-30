@@ -1,5 +1,9 @@
-title: К хуям
-tooltip: Взрыв-схема выбранных элементов
+title:
+  ru: К хуям
+  en_us: "Exploded\nView"
+tooltip:
+  ru: Взрыв-схема выбранных элементов
+  en_us: Builds an exploded view of the selected elements by their connections.
 author: db
 version: 1.0.0
 description: Автоматический разнос по осям на заданное расстояние друг от друга

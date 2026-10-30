@@ -1,5 +1,9 @@
-title: Забрать
-tooltip: Импорт данных из Excel в Revit
+title:
+  ru: Забрать
+  en_us: "Excel\nto Schedule"
+tooltip:
+  ru: Импорт данных из Excel в Revit
+  en_us: Imports values edited in Excel back into Revit.
 author: db
 version: 1.0.0
 description: Импорт данных из Excel в Revit

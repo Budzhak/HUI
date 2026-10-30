@@ -1,5 +1,9 @@
-title: "Колонка"
-tooltip: "Выделенные марки — в колонку друг под другом; выноска от точки вертикально, затем полка; сторона колонки — по щелчку. Порядок строк без пересечений."
+title:
+  ru: Колонка
+  en_us: Column
+tooltip:
+  ru: Выделенные марки — в колонку друг под другом; выноска от точки вертикально, затем полка; сторона колонки — по щелчку. Порядок строк без пересечений.
+  en_us: Arranges the selected tags in a column; the leader runs vertically from the point, then to the shoulder. Click to choose the column side; rows are ordered to avoid crossings.
 author: db
 version: 1.0.0
 icon: icon.png

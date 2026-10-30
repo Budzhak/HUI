@@ -1,5 +1,9 @@
-title: "Рядом"
-tooltip: "Выделенные марки — в ряд с заданным шагом."
+title:
+  ru: Рядом
+  en_us: Align Horizontal
+tooltip:
+  ru: Выделенные марки — в ряд с заданным шагом.
+  en_us: Arranges the selected tags in a row at a set spacing.
 author: db
 version: 1.0.0
 icon: icon.png

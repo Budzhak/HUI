@@ -1,5 +1,9 @@
-title: "Нумерация кликами"
-tooltip: "Номера по щелчкам по элементам, начиная с введённого."
+title:
+  ru: Нумерация кликами
+  en_us: Click Numbering
+tooltip:
+  ru: Номера по щелчкам по элементам, начиная с введённого.
+  en_us: Assigns numbers by clicking elements, starting from the entered number.
 author: db
 version: 1.0.0
 icon: icon.png

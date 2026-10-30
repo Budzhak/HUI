@@ -1,5 +1,9 @@
-title: "Сброс марок"
-tooltip: "Ровная выноска без излома: длина и сторона — по окну, щелчок — точка."
+title:
+  ru: Сброс марок
+  en_us: Reset Tags
+tooltip:
+  ru: 'Ровная выноска без излома: длина и сторона — по окну, щелчок — точка.'
+  en_us: 'Makes a straight leader without a bend: length and side are set in the dialog, a click sets the point.'
 author: db
 version: 1.0.0
 icon: icon.png

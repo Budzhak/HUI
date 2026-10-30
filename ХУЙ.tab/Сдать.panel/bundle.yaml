@@ -1,5 +1,7 @@
-title: "Сдать нахуй"
+title:
+  ru: Сдать нахуй
+  en_us: Publish
 layout:
-  - SheetContent
-  - SheetRenumber
-  - PdfVector
+- SheetContent
+- SheetRenumber
+- PdfVector

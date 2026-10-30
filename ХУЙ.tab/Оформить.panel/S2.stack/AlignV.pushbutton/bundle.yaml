@@ -1,5 +1,9 @@
-title: "Друг под другом"
-tooltip: "Выделенные марки — в столбик с заданным шагом."
+title:
+  ru: Друг под другом
+  en_us: Align Vertical
+tooltip:
+  ru: Выделенные марки — в столбик с заданным шагом.
+  en_us: Arranges the selected tags in a column at a set spacing.
 author: db
 version: 1.0.0
 icon: icon.png
