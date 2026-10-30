@@ -31,7 +31,7 @@ from System.Windows.Controls import (StackPanel, WrapPanel, TextBlock, CheckBox,
                                      ListBox, Canvas, GridSplitter, SelectionMode)
 from System.Windows.Media import (SolidColorBrush, Color, ScaleTransform, RotateTransform, TranslateTransform,
                                   TransformGroup, DoubleCollection, PointCollection)
-from System.Windows.Shapes import Line as WLine, Ellipse, Polygon
+from System.Windows.Shapes import Line as WLine, Ellipse, Polygon, Polyline as WPolyline
 from System.Windows.Input import Keyboard, ModifierKeys, Key, Cursors
 
 doc = revit.doc
@@ -988,7 +988,7 @@ def _draw_cube(it, Wd):
         Canvas.SetLeft(tb, q.X - tb.DesiredSize.Width / 2.0)
         Canvas.SetTop(tb, q.Y - tb.DesiredSize.Height / 2.0)
         cv3.Children.Add(tb)
-    # стрелки, как в Revit: ↻ ↺ — повернуть картинку на 90°; когда смотрим строго на грань — ▲▼◀▶ на соседнюю грань
+    # стрелки, как в Revit, только когда смотрим строго на грань: дуги — повернуть на 90°, ▲▼◀▶ — соседняя грань
     def arrow(text, x, y, tag, tip, size=15):
         tb_ = TextBlock()
         tb_.Text, tb_.FontSize, tb_.Foreground, tb_.Cursor, tb_.ToolTip = text, size, B(u'#4E5D54'), Cursors.Hand, tip
@@ -1004,10 +1004,45 @@ def _draw_cube(it, Wd):
         Canvas.SetLeft(tb_, x)
         Canvas.SetTop(tb_, y)
         cv3.Children.Add(tb_)
-    arrow(u'↻', ox + 26, oy - 44, ('roll', -90.0), u'Повернуть вид на 90° по часовой')
-    arrow(u'↺', ox - 40, oy - 44, ('roll', 90.0), u'Повернуть вид на 90° против часовой')
+    def roll_arrow(t0, t1, deg, tip):
+        """Дуговая стрелка поворота, как в Revit: дуга справа сверху от куба, остриё на конце t1 (градусы, от оси X
+        против часовой; экран — Y вниз)."""
+        r_ = h * 2.2
+        pts = [(ox + r_ * math.cos(math.radians(t0 + (t1 - t0) * q / 12.0)),
+                oy - r_ * math.sin(math.radians(t0 + (t1 - t0) * q / 12.0))) for q in range(13)]
+        sg = 1.0 if t1 > t0 else -1.0                 # направление обхода
+        th = math.radians(t1)
+        tx, ty = -math.sin(th) * sg, -math.cos(th) * sg   # касательная в экранных координатах
+        ex, ey = pts[-1]
+        head = Polygon()
+        for px, py in ((ex + tx * 6, ey + ty * 6), (ex - ty * 4, ey + tx * 4), (ex + ty * 4, ey - tx * 4)):
+            head.Points.Add(Point(px, py))
+        line = WPolyline()
+        for px, py in pts:
+            line.Points.Add(Point(px, py))
+        hit = WPolyline()                             # широкая прозрачная полоса — по ней удобно попасть
+        for px, py in pts:
+            hit.Points.Add(Point(px, py))
+        hit.Stroke, hit.StrokeThickness = _shade((255, 255, 255), 1.0, 1), 10
+        line.Stroke, line.StrokeThickness, line.IsHitTestVisible = B(u'#4E5D54'), 1.6, False
+        head.Fill, head.IsHitTestVisible = B(u'#4E5D54'), False
+        for el in (hit, head):
+            el.Tag = ('roll', deg)
+        hit.Cursor, hit.ToolTip = Cursors.Hand, tip
+
+        def on_in(s_, e_):
+            line.Stroke = head.Fill = B(u'#1E88E5')
+
+        def on_out(s_, e_):
+            line.Stroke = head.Fill = B(u'#4E5D54')
+        hit.MouseEnter += on_in
+        hit.MouseLeave += on_out
+        for el in (line, head, hit):
+            cv3.Children.Add(el)
     cam = cam_vecs()
     if max([abs(_facing(E.vmul(ax[k], 1))) for k in keys]) > 0.995:
+        roll_arrow(48, 70, 90.0, u'Повернуть вид на 90° против часовой')
+        roll_arrow(42, 20, -90.0, u'Повернуть вид на 90° по часовой')
         rs, us = cam[0], cam[1]
         arrow(u'▲', ox - 5, oy - 50, ('cube', us), u'Соседняя грань сверху', 11)
         arrow(u'▼', ox - 5, oy + 34, ('cube', E.vmul(us, -1)), u'Соседняя грань снизу', 11)
@@ -1044,7 +1079,7 @@ def on3_up(s_, e_):
         cam_changed()                            # 30.10 db: повернули 3D — аксонометрия под тем же углом
         return                                   # тянули — поворот, не щелчок
     src = V3.get('src')
-    i = getattr(src, 'Tag', None) if isinstance(src, (Polygon, TextBlock)) else None
+    i = getattr(src, 'Tag', None) if isinstance(src, (Polygon, TextBlock, WPolyline)) else None
     if isinstance(i, tuple) and i and i[0] == 'cube':
         set_cam(i[1])                            # видовой куб
         return
