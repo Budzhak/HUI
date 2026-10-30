@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Значок у названия вкладки «ХУЙ».
+"""Значок у названия вкладки «XYZ».
 
 pyRevit выполняет этот файл при запуске Revit и при каждом Reload.
 В заголовок вкладки (mStackPanel кнопки вкладки) перед текстом
@@ -36,7 +36,7 @@ _log('--- startup: ' + sys.version.split()[0])
 try:
     _here = os.path.dirname(os.path.abspath(__file__))
 except NameError:
-    _here = os.path.join(os.environ.get('APPDATA', ''), 'pyRevit', 'Extensions', u'ХУЙ.extension'.encode('utf-8') if sys.version_info[0] < 3 else u'ХУЙ.extension')
+    _here = os.path.join(os.environ.get('APPDATA', ''), 'pyRevit', 'Extensions', u'XYZ.extension'.encode('utf-8') if sys.version_info[0] < 3 else u'XYZ.extension')
 _log('dir: ' + repr(_here))
 
 _OK = True
@@ -68,7 +68,7 @@ except Exception:
     _OK = False
     _log(traceback.format_exc())
 
-TAB_ID = u'ХУЙ'
+TAB_ID = u'XYZ'
 ICON = os.path.join(_here, 'tab_icon.png')
 MARK = 'db_tab_icon'
 KEY = 'db_tab_icon_timer'
@@ -181,42 +181,42 @@ if _OK and os.path.exists(ICON):
 
 
 # ------------------------------------------------------------------
-# Марки-отметки на взрыв-схемах (lib/hui_elev_marks.py): обработчик изменений
+# Марки-отметки на взрыв-схемах (lib/xyz_elev_marks.py): обработчик изменений
 # модели пересчитывает значения и положение марок db_М_Отметка_Схемы при
 # изменении геометрии элементов и смещений на взрыв-схемах.
-# Регистрируется, только если включён (hui_settings 'elev_marks_auto', кнопка «Автопилот»).
+# Регистрируется, только если включён (xyz_settings 'elev_marks_auto', кнопка «Автопилот»).
 # ------------------------------------------------------------------
 try:
     _lib = os.path.join(_here, 'lib')
     if _lib not in sys.path:
         sys.path.append(_lib)
-    sys.modules.pop('hui_settings', None)
-    import hui_settings
-    if hui_settings.get('elev_marks_auto'):
-        sys.modules.pop('hui_elev_marks', None)
-        import hui_elev_marks
-        hui_elev_marks.register(__revit__.ActiveAddInId)
-        _log('hui_elev_marks updater registered')
+    sys.modules.pop('xyz_settings', None)
+    import xyz_settings
+    if xyz_settings.get('elev_marks_auto'):
+        sys.modules.pop('xyz_elev_marks', None)
+        import xyz_elev_marks
+        xyz_elev_marks.register(__revit__.ActiveAddInId)
+        _log('xyz_elev_marks updater registered')
     else:
-        _log('hui_elev_marks updater off (elev_marks_auto = False)')
+        _log('xyz_elev_marks updater off (elev_marks_auto = False)')
 except Exception:
-    _log('hui_elev_marks: ' + traceback.format_exc())
+    _log('xyz_elev_marks: ' + traceback.format_exc())
 
 
 # ------------------------------------------------------------------
-# Панель «ХУЙ» на контекстной вкладке «Изменить | …», lib/hui_ctxpanel.py.
-# Вкладка ХУЙ строится не сразу — ставим по таймеру (тот же, что для значка), если панели нет.
-# После Reload pyRevit кнопки ХУЙ пересоздаются — переставляем панель заново.
+# Панель «XYZ» на контекстной вкладке «Изменить | …», lib/xyz_ctxpanel.py.
+# Вкладка XYZ строится не сразу — ставим по таймеру (тот же, что для значка), если панели нет.
+# После Reload pyRevit кнопки XYZ пересоздаются — переставляем панель заново.
 # ------------------------------------------------------------------
 try:
-    sys.modules.pop('hui_ctxpanel', None)
-    import hui_ctxpanel
+    sys.modules.pop('xyz_ctxpanel', None)
+    import xyz_ctxpanel
     _ctx_uiapp = __revit__
-    hui_ctxpanel.remove()
+    xyz_ctxpanel.remove()
 
     def _ensure_ctx(*args):
         try:
-            _done['ctx'] = bool(hui_ctxpanel.ensure(_ctx_uiapp))
+            _done['ctx'] = bool(xyz_ctxpanel.ensure(_ctx_uiapp))
         except Exception:
             _log('ctxpanel: ' + traceback.format_exc())
 
@@ -230,8 +230,8 @@ except Exception:
 
 
 # ------------------------------------------------------------------
-# Вкладка «ХУЙ» — сразу после «Вставить» (db, 18.10.2026), только если включено
-# в настройках: hui_settings 'tab_after_insert' (по умолчанию выключено).
+# Вкладка «XYZ» — сразу после «Вставить» (db, 18.10.2026), только если включено
+# в настройках: xyz_settings 'tab_after_insert' (по умолчанию выключено).
 # Revit ставит вкладки надстроек в конец; переносим и следим тем же таймером
 # (после Reload pyRevit или загрузки других надстроек вкладка снова уезжает в конец).
 # ------------------------------------------------------------------
@@ -240,28 +240,28 @@ AFTER_TAB = u'Insert'
 
 def _ensure_tab_order(*args):
     try:
-        import hui_settings
-        if not hui_settings.get('tab_after_insert'):
+        import xyz_settings
+        if not xyz_settings.get('tab_after_insert'):
             _done['tab'] = True               # по умолчанию порядок вкладок не трогаем
             return
         ribbon = ComponentManager.Ribbon
         if ribbon is None:
             return
         tabs = ribbon.Tabs
-        hui = ins = -1
+        xyz_tab = ins = -1
         for i in range(tabs.Count):
             tid = tabs[i].Id
             if tid == TAB_ID:
-                hui = i
+                xyz_tab = i
             elif tid == AFTER_TAB:
                 ins = i
-        if hui >= 0 and hui == ins + 1:
+        if xyz_tab >= 0 and xyz_tab == ins + 1:
             _done['tab'] = True
             return
-        if hui < 0 or ins < 0:
+        if xyz_tab < 0 or ins < 0:
             return
         # Move() Revit не перерисовывает (вкладка остаётся в конце) — только Remove + Insert
-        tab = tabs[hui]
+        tab = tabs[xyz_tab]
         active = ribbon.ActiveTab
         tabs.Remove(tab)
         for i in range(tabs.Count):
@@ -315,7 +315,7 @@ except Exception:
 # target file»). Переназначаем её на свежую сборку — ту же, что у соседней кнопки стопки.
 # (db 18.10.2026: «Прямая выноска» → S4.stack)
 # ------------------------------------------------------------------
-_REPOINT = [(u'Пиздато', u'Straight', u'NumClick', u'хуй_хуй_оформить_s4_straight')]
+_REPOINT = [((u'Оформить', u'Annotate'), u'Straight', u'NumClick', u'xyz_xyz_annotate_s4_straight')]
 
 
 def _repoint_buttons():
@@ -323,7 +323,7 @@ def _repoint_buttons():
         for p in __revit__.GetRibbonPanels(TAB_ID):
             items = dict((it.Name, it) for it in p.GetItems())
             for pan, name, neigh, cls in _REPOINT:
-                if p.Name != pan or name not in items or neigh not in items:
+                if p.Name not in pan or name not in items or neigh not in items:
                     continue
                 b, n = items[name], items[neigh]
                 if b.AssemblyName != n.AssemblyName or b.ClassName != cls:

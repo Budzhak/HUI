@@ -1,0 +1,9 @@
+title:
+  ru: Найти
+  en_us: Inspect
+layout:
+- Analis
+- WhoFilter
+- TypeFilter
+- Tag
+- Untagged

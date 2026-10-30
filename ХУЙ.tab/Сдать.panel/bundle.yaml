@@ -1,7 +1,0 @@
-title:
-  ru: Сдать нахуй
-  en_us: Publish
-layout:
-- SheetContent
-- SheetRenumber
-- PdfVector

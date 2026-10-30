@@ -1,0 +1,10 @@
+title:
+  ru: Вдребезги
+  en_us: "Exploded\nView"
+tooltip:
+  ru: Взрыв-схема выбранных элементов
+  en_us: Builds an exploded view of the selected elements by their connections.
+author: db
+version: 1.0.0
+description: Автоматический разнос по осям на заданное расстояние друг от друга
+icon: icon.png

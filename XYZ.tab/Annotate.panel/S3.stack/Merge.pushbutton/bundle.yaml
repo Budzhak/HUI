@@ -1,0 +1,9 @@
+title:
+  ru: Скопом
+  en_us: Merge Tags
+tooltip:
+  ru: Одинаковые марки выделенного — одна марка с несколькими выносками.
+  en_us: Combines identical tags of the selected elements into one tag with multiple leaders.
+author: db
+version: 1.0.0
+icon: icon.png

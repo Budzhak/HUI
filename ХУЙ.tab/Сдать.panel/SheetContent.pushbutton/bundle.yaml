@@ -1,9 +1,0 @@
-title:
-  ru: "Опись\nхуйни"
-  en_us: "Sheet\nContents"
-tooltip:
-  ru: 'Выгружает в Excel листы выбранной коллекции/группы диспетчера проекта (например, РД › ВК/ОВ/ТМ) вместе с их содержимым: виды, легенды, спецификации. Два листа Excel: плоская таблица для фильтров и сверки и дерево «как в диспетчере».'
-  en_us: Exports the contents of sheets to Excel.
-author: db
-version: 1.0.0
-icon: icon.png
