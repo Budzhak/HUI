@@ -4,8 +4,8 @@
 pyRevit выполняет этот файл при запуске Revit и при каждом Reload.
 В заголовок вкладки (mStackPanel кнопки вкладки) перед текстом
 вставляется картинка tab_icon.png из папки расширения.
-Ribbon может пересоздать заголовок (сворачивание ленты, смена темы),
-поэтому раз в 3 секунды проверяем, на месте ли значок.
+Таймер (раз в 3 с) работает, только пока значок, панель на «Изменить | …»
+и (если включено) порядок вкладок не встали на место, — потом останавливается.
 """
 import os
 import sys
@@ -124,10 +124,14 @@ def _has_icon(panel):
     return False
 
 
+_done = {'icon': False, 'ctx': False, 'tab': False, 'n': 0}
+
+
 def ensure_icon(*args):
     try:
         panel = _state['panel']
         if panel is not None and panel.IsLoaded and _has_icon(panel):
+            _done['icon'] = True
             return
         ribbon, tab = _find_tab()
         if tab is None:
@@ -137,6 +141,7 @@ def ensure_icon(*args):
             return
         _state['panel'] = panel
         if _has_icon(panel):
+            _done['icon'] = True
             return
         img = Image()
         img.Source = _bitmap()
@@ -149,6 +154,7 @@ def ensure_icon(*args):
         if isinstance(panel, StackPanel):
             panel.Orientation = Orientation.Horizontal
         panel.Children.Insert(0, img)
+        _done['icon'] = True
     except Exception:
         _log(traceback.format_exc())
 
@@ -175,21 +181,26 @@ if _OK and os.path.exists(ICON):
 
 
 # ------------------------------------------------------------------
-# Марки-отметки на взрыв-схемах (lib/elev_marks.py): обработчик изменений
+# Марки-отметки на взрыв-схемах (lib/hui_elev_marks.py): обработчик изменений
 # модели пересчитывает значения и положение марок db_М_Отметка_Схемы при
 # изменении геометрии элементов и смещений на взрыв-схемах.
+# Регистрируется, только если включён (hui_settings 'elev_marks_auto', кнопка «Автопилот»).
 # ------------------------------------------------------------------
 try:
     _lib = os.path.join(_here, 'lib')
     if _lib not in sys.path:
         sys.path.append(_lib)
-    sys.modules.pop('elev_marks', None)
-    import elev_marks
-    _uiapp = __revit__
-    elev_marks.register(_uiapp.ActiveAddInId)
-    _log('elev_marks updater registered')
+    sys.modules.pop('hui_settings', None)
+    import hui_settings
+    if hui_settings.get('elev_marks_auto'):
+        sys.modules.pop('hui_elev_marks', None)
+        import hui_elev_marks
+        hui_elev_marks.register(__revit__.ActiveAddInId)
+        _log('hui_elev_marks updater registered')
+    else:
+        _log('hui_elev_marks updater off (elev_marks_auto = False)')
 except Exception:
-    _log('elev_marks: ' + traceback.format_exc())
+    _log('hui_elev_marks: ' + traceback.format_exc())
 
 
 # ------------------------------------------------------------------
@@ -205,7 +216,7 @@ try:
 
     def _ensure_ctx(*args):
         try:
-            hui_ctxpanel.ensure(_ctx_uiapp)
+            _done['ctx'] = bool(hui_ctxpanel.ensure(_ctx_uiapp))
         except Exception:
             _log('ctxpanel: ' + traceback.format_exc())
 
@@ -219,7 +230,8 @@ except Exception:
 
 
 # ------------------------------------------------------------------
-# Вкладка «ХУЙ» — сразу после «Вставить» (db, 18.10.2026).
+# Вкладка «ХУЙ» — сразу после «Вставить» (db, 18.10.2026), только если включено
+# в настройках: hui_settings 'tab_after_insert' (по умолчанию выключено).
 # Revit ставит вкладки надстроек в конец; переносим и следим тем же таймером
 # (после Reload pyRevit или загрузки других надстроек вкладка снова уезжает в конец).
 # ------------------------------------------------------------------
@@ -228,6 +240,10 @@ AFTER_TAB = u'Insert'
 
 def _ensure_tab_order(*args):
     try:
+        import hui_settings
+        if not hui_settings.get('tab_after_insert'):
+            _done['tab'] = True               # по умолчанию порядок вкладок не трогаем
+            return
         ribbon = ComponentManager.Ribbon
         if ribbon is None:
             return
@@ -239,7 +255,10 @@ def _ensure_tab_order(*args):
                 hui = i
             elif tid == AFTER_TAB:
                 ins = i
-        if hui < 0 or ins < 0 or hui == ins + 1:
+        if hui >= 0 and hui == ins + 1:
+            _done['tab'] = True
+            return
+        if hui < 0 or ins < 0:
             return
         # Move() Revit не перерисовывает (вкладка остаётся в конце) — только Remove + Insert
         tab = tabs[hui]
@@ -265,6 +284,29 @@ try:
     _log('tab order hooked')
 except Exception:
     _log('tab order: ' + traceback.format_exc())
+
+
+# ------------------------------------------------------------------
+# Таймер больше не нужен, когда всё на месте (или через 5 минут на всякий случай).
+# ------------------------------------------------------------------
+def _stop_when_done(*args):
+    try:
+        _done['n'] += 1
+        if (_done['icon'] and _done['ctx'] and _done['tab']) or _done['n'] >= 100:
+            tm = AppDomain.CurrentDomain.GetData(KEY)
+            if tm is not None:
+                tm.Stop()
+            _log('timer stopped: %s' % dict(_done))
+    except Exception:
+        _log('timer stop: ' + traceback.format_exc())
+
+
+try:
+    _stop_timer = AppDomain.CurrentDomain.GetData(KEY)
+    if _stop_timer is not None:
+        _stop_timer.Tick += _stop_when_done
+except Exception:
+    _log('timer stop hook: ' + traceback.format_exc())
 
 
 # ------------------------------------------------------------------

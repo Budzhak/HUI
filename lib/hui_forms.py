@@ -490,7 +490,7 @@ class CommandSwitchWindow(object):
 def pick_spot_side(title=u'Отметка на взрыв-схеме', value=u'±0.000'):
     """Окно 2×2: четыре квадратные кнопки с картинкой отметки (стрелка, выноска,
     полка, значение). Сверху — полка вверху, снизу — полка внизу; слева/справа — куда полка.
-    Возвращает 'UL' | 'UR' | 'L' | 'R' (как elev_marks.SIDES) или None (Esc).
+    Возвращает 'UL' | 'UR' | 'L' | 'R' (как hui_elev_marks.SIDES) или None (Esc).
     Клавиши: 7 9 / 1 3 (цифровой блок) или Q E / Z C."""
     from System.Windows.Controls import Canvas
     from System.Windows.Shapes import Line, Polyline

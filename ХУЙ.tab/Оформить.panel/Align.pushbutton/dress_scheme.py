@@ -2902,7 +2902,7 @@ def _ensure_flat_plane(ctx):
 
 
 def _mark_side_search(ctx, crv, d, tpars=(0.5, 0.35, 0.65, 0.2, 0.8), force=False):
-    """Место марки-отметки (elev_marks) на смещённом элементе: точка и сторона полки."""
+    """Место марки-отметки (hui_elev_marks) на смещённом элементе: точка и сторона полки."""
     best = None
     for tpar in tpars:
         p = crv.Evaluate(tpar, True)
@@ -2958,14 +2958,14 @@ def _place_any(ctx, el, ref, crv, t_dn, t_up, dmap, tpars=(0.5, 0.35, 0.65, 0.2,
     («Отметка на взрыв-схеме»): Revit рисует свою отметку на несмещённом месте.
     force — нет чистого места: поставить в наименее плохое (элемент — в ctx.forced).
     ref = None — у элемента нет ребра для отметки Revit: марка-отметка и на несмещённом."""
-    import elev_marks
+    import hui_elev_marks
     d = ctx.dp(el)
     for frc in ((False, True) if force else (False,)):
         if d.GetLength() > 1e-6 or ref is None:
             b = _mark_side_search(ctx, crv, d, tpars, frc)
             if b is None:
                 continue
-            tg = elev_marks.place(ctx.doc, ctx.view, el, None, b[1], b[2], None, dmap, None)
+            tg = hui_elev_marks.place(ctx.doc, ctx.view, el, None, b[1], b[2], None, dmap, None)
             ctx.occ.add_box(b[3])
             ok = tg is not None
         else:
@@ -2978,7 +2978,7 @@ def _place_any(ctx, el, ref, crv, t_dn, t_up, dmap, tpars=(0.5, 0.35, 0.65, 0.2,
             except Exception:
                 # Revit не дал поставить отметку на это ребро — марка-отметка
                 bm = _mark_side_search(ctx, crv, d, tpars, True)
-                tg = elev_marks.place(ctx.doc, ctx.view, el, None, bm[1], bm[2], None, dmap, None) if bm else None
+                tg = hui_elev_marks.place(ctx.doc, ctx.view, el, None, bm[1], bm[2], None, dmap, None) if bm else None
                 if bm:
                     ctx.occ.add_box(bm[3])
                 ok = tg is not None
@@ -3231,7 +3231,7 @@ def step_elev_pipes(ctx, pick=None):
     """Отметки на схеме труб. Возвращает True, если на виде есть трубы.
     pick — множество Id, отмеченных в окне выбора (None — как раньше: трубы и
     оборудование выделенного или всего вида)."""
-    import elev_marks
+    import hui_elev_marks
     doc = ctx.doc
     t_dn, t_up = _spot_type(doc, T_SPOT_DN_SCH), _spot_type(doc, T_SPOT_UP_SCH)
     els = _pipe_view_els(ctx)
@@ -3267,7 +3267,7 @@ def step_elev_pipes(ctx, pick=None):
     groups = list(gmap.values())
     glen = [max(r['L'] for r in g) for g in groups]
     clusters = _cluster_same_level(ctx, groups, glen)
-    dmap = elev_marks.disp_map(doc, ctx.view)
+    dmap = hui_elev_marks.disp_map(doc, ctx.view)
 
     t = Transaction(doc, u"Высотные отметки (трубы)")
     t.Start()
@@ -3428,7 +3428,7 @@ def step_elev_pipes(ctx, pick=None):
 
 
 def step_elev(ctx, pick=None):
-    import elev_marks
+    import hui_elev_marks
     pipe_mode = step_elev_pipes(ctx, pick)
     doc, view, mm = ctx.doc, ctx.view, ctx.mm
     t_dn, t_up = _spot_type(doc, T_SPOT_DN), _spot_type(doc, T_SPOT_UP)
@@ -3451,7 +3451,7 @@ def step_elev(ctx, pick=None):
         if _cat(d) == C_DUCT and isinstance(d.Location, LocationCurve) and is_hz(d) and \
                 (ctx.in_scope(d) if pick is None else _iv(d.Id) in pick):
             groups.setdefault(key(d), []).append(d)
-    dmap = elev_marks.disp_map(doc, view)
+    dmap = hui_elev_marks.disp_map(doc, view)
     t = Transaction(doc, u"Высотные отметки")
     t.Start()
     try:
@@ -3463,7 +3463,7 @@ def step_elev(ctx, pick=None):
                 if k[0] != 0:
                     p = d.Location.Curve.Evaluate(0.5, True)
                     try:
-                        tg = elev_marks.place(doc, view, d, None, p, 'R', None, dmap, None)
+                        tg = hui_elev_marks.place(doc, view, d, None, p, 'R', None, dmap, None)
                         _occ_mark(ctx, tg)
                         ctx.add(u'Отметки на смещённых участках')
                         ok = True
@@ -3489,11 +3489,11 @@ def step_elev(ctx, pick=None):
             i = _iv(el.Id)
             if i in ctx.spotted or u'ОТМ' in ctx.kinds.get(i, ()):
                 continue
-            p = elev_marks._bottom_point_fi(el)
+            p = hui_elev_marks._bottom_point_fi(el)
             if p is None:
                 continue
             try:
-                tg = elev_marks.place(doc, view, el, None, p, 'R', None, dmap, None)
+                tg = hui_elev_marks.place(doc, view, el, None, p, 'R', None, dmap, None)
                 _occ_mark(ctx, tg)
                 ctx.add(u'Отметки низа оборудования' if _cat(el) == C_EQ else u'Отметки низа арматуры и др.')
             except Exception as ex:

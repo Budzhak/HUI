@@ -322,10 +322,10 @@ def _hits(ctx, box):
 
 
 def _place(ctx, doc, ref, pts, el, types, label, role=None):
-    """Марка-отметка (elev_marks): перебор точки на ребре/оси и стороны полки,
+    """Марка-отметка (hui_elev_marks): перебор точки на ребре/оси и стороны полки,
     выбирается вариант без наложений на марки и другие отметки. Марка рисуется
     там, где элемент показан на взрыв-схеме, значение пересчитывает ElevUpdater."""
-    import elev_marks
+    import hui_elev_marks
     mm = ctx.mm
     dp = ctx.disp.get(_iv(el.Id))
     best = None
@@ -340,7 +340,7 @@ def _place(ctx, doc, ref, pts, el, types, label, role=None):
     role = None
     if label == 'noelev':
         role = 'axis' if _is_round(el) else 'bottom'
-    tag = elev_marks.place(doc, ctx.view, el, ref, pm, 'R' if sx == 1 else 'L', None, ctx.disp, role)
+    tag = hui_elev_marks.place(doc, ctx.view, el, ref, pm, 'R' if sx == 1 else 'L', None, ctx.disp, role)
     ctx.occupied.extend(boxes)
     return tag, score
 
@@ -371,9 +371,9 @@ def run(doc, uidoc, settings=None):
         for k, v in names.items():
             if nm == v:
                 types[k] = t
-    import elev_marks
-    if len(elev_marks.mark_types(doc)) < 4:
-        return u"В проект не загружено семейство марки «{}».".format(elev_marks.FAMILY)
+    import hui_elev_marks
+    if len(hui_elev_marks.mark_types(doc)) < 4:
+        return u"В проект не загружено семейство марки «{}».".format(hui_elev_marks.FAMILY)
 
     filt = None
     fexc = None
@@ -422,7 +422,7 @@ def run(doc, uidoc, settings=None):
         except Exception:
             pass
     try:
-        import elev_marks as _em
+        import hui_elev_marks as _em
         for _t in _em.mark_tags(doc, view):
             _info = _em.read_entity(_t)
             if _info:

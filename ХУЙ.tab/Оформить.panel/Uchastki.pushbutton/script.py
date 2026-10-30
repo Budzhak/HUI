@@ -3,12 +3,12 @@
 проверка схемы без пересчёта (панель «Пиздато»)."""
 import os
 import sys
-for _m in ('uchastki', 'dress_scheme', 'stack_tags', 'hui_plane', 'hui_schedfmt'):
+for _m in ('hui_uchastki', 'dress_scheme', 'stack_tags', 'hui_plane', 'hui_schedfmt'):
     sys.modules.pop(_m, None)
 _align = os.path.join(os.path.dirname(os.path.dirname(__file__)), u'Align.pushbutton')
 if _align not in sys.path:
     sys.path.append(_align)
-import uchastki
+import hui_uchastki
 import hui_forms as forms
 from Autodesk.Revit.DB import ElementId, Transaction, TransactionGroup, View3D
 from System.Collections.Generic import List
@@ -30,7 +30,7 @@ A_FIRST = u'Посчитать участки, создать специфика
 A_FIRST_NT = u'Посчитать участки и спецификацию, без марок'
 
 # меню — по тому, что уже есть на виде (db 18.10: «почему "Пересчитать", если ещё не запускал?»)
-st = uchastki.view_state(doc, view)
+st = hui_uchastki.view_state(doc, view)
 if not st['nums']:
     state_msg = u'Участки на этом виде ещё не считались.'
     opts = [A_FIRST, A_FIRST_NT]
@@ -59,7 +59,7 @@ def check_window():
     from System.Windows import Thickness, Visibility, ResizeMode, TextWrapping
     from System.Windows.Controls import ListBox, Button, TextBlock, Border
     from System.Windows.Forms import Screen
-    items, n_all, n_tag = uchastki.check(doc, view)
+    items, n_all, n_tag = hui_uchastki.check(doc, view)
     if not items:
         forms.alert(u'Вид «%s»: участков %d, у всех есть марка номера, все трубы жидкостной линии '
                     u'с номером.' % (view.Name, n_all), title=TITLE, exitscript=True)
@@ -113,7 +113,7 @@ def check_window():
         show(k)
 
     def refresh(s, e):
-        its, a, b = uchastki.check(doc, view)
+        its, a, b = hui_uchastki.check(doc, view)
         state['items'] = its
         fill()
         forms.set_subtitle(dlg, u'вид «%s» · участков %d · с маркой номера %d · замечаний %d' % (
@@ -144,7 +144,7 @@ def place_tags_only():
     tg = TransactionGroup(doc, u'Участки фреона: марки номеров · ' + view.Name)
     tg.Start()
     try:
-        n_ok, miss = uchastki.place_number_tags(doc, view, uchastki.recorded_segs(doc, view),
+        n_ok, miss = hui_uchastki.place_number_tags(doc, view, hui_uchastki.recorded_segs(doc, view),
                                                 dress_scheme, only_missing=True)
         tg.Assimilate()
     except Exception as ex:
@@ -164,25 +164,25 @@ def recalc():
         t.Start()
         # параметры — до пересчёта: db_Единица измерения, db_Трубы_* из ФОП, db_Участок_* на
         # охладители (арматура воздуховодов) — иначе их нет в ведомости оборудования (db 19.10)
-        binds = uchastki.ensure_pipe_params(doc)
+        binds = hui_uchastki.ensure_pipe_params(doc)
         if binds:
             doc.Regenerate()
-        segs, rep = uchastki.run(doc, view, write=True)
+        segs, rep = hui_uchastki.run(doc, view, write=True)
         if binds:
             rep.append(u'Параметры: ' + u'; '.join(binds))
         made = []
-        for n in uchastki.systems(segs):
-            vs, new = uchastki.ensure_schedule(doc, n)
+        for n in hui_uchastki.systems(segs):
+            vs, new = hui_uchastki.ensure_schedule(doc, n)
             made.append(u'«%s» — %s' % (vs.Name, new if isinstance(new, type(u'')) else (u'создана' if new else u'обновлена')))
-            ve, st = uchastki.ensure_equipment_schedule(doc, n, uchastki.sys_label(doc, view, n))
+            ve, st = hui_uchastki.ensure_equipment_schedule(doc, n, hui_uchastki.sys_label(doc, view, n))
             made.append(u'«%s» — %s' % (ve.Name, st))
-            tubes, elbows, dia, prep = uchastki.pipe_rows(doc, view, n)   # трубы и отводы жидк. + газ. (db 18.10)
+            tubes, elbows, dia, prep = hui_uchastki.pipe_rows(doc, view, n)   # трубы и отводы жидк. + газ. (db 18.10)
             rep.extend(prep)
-            made.extend(uchastki.ensure_pipe_tables(doc, view, n, dia))
+            made.extend(hui_uchastki.ensure_pipe_tables(doc, view, n, dia))
         t.Commit()
         if ans in (A_MISSING, A_ALL):
             import dress_scheme
-            n_ok, miss = uchastki.place_number_tags(doc, view, segs, dress_scheme, only_missing=(ans == A_MISSING))
+            n_ok, miss = hui_uchastki.place_number_tags(doc, view, segs, dress_scheme, only_missing=(ans == A_MISSING))
             rep.append(u'Марок номеров поставлено: %d' % n_ok +
                        (u'; без места: %s — поставьте вручную («Прямая выноска»)' % u', '.join(miss) if miss else u''))
         tg.Assimilate()

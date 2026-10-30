@@ -220,7 +220,7 @@ def head_for(side, p_u, p_v, rel, L, has_leader, cur_u=None):
 
 
 def _is_elev_mark(doc, tag):
-    """Марки-отметки взрыв-схемы ведёт свой обработчик (elev_marks) - их не трогаем."""
+    """Марки-отметки взрыв-схемы ведёт свой обработчик (hui_elev_marks) - их не трогаем."""
     try:
         sym = doc.GetElement(tag.GetTypeId())
         return u'Отметка_Схемы' in (sym.FamilyName or u'')

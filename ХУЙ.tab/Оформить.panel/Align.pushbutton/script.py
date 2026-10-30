@@ -108,12 +108,12 @@ else:
 if not action_choice:
     raise SystemExit
 
-# Карантин (lib/quarantine.py): нестабильные режимы - с предупреждением
+# Карантин (lib/hui_quarantine.py): нестабильные режимы - с предупреждением
 if action_choice in (ACTION_SMART, ACTION_UNSTACK):
     import sys as _q_sys
-    _q_sys.modules.pop('quarantine', None)
-    import quarantine
-    if not quarantine.confirm(u"Умные выноски" if action_choice == ACTION_SMART else u"Разнести наложенные"):
+    _q_sys.modules.pop('hui_quarantine', None)
+    import hui_quarantine
+    if not hui_quarantine.confirm(u"Умные выноски" if action_choice == ACTION_SMART else u"Разнести наложенные"):
         raise SystemExit
 
 # Всем командам, кроме "Умных выносок", нужны выделенные марки
@@ -591,7 +591,7 @@ if action_choice == ACTION_DRESS:
     if _here not in sys.path:
         sys.path.insert(0, _here)
     try:
-        for _m in ('dress_scheme', 'stack_tags', 'elev_marks'):
+        for _m in ('dress_scheme', 'stack_tags', 'hui_elev_marks'):
             sys.modules.pop(_m, None)
         import dress_scheme
         _cfg = script.get_config('hui_align')
@@ -683,17 +683,17 @@ if action_choice == ACTION_DRESS:
 
 # ============================================================
 # БЛОК 4Г4. "Отметка на взрыв-схеме (выбранного элемента)" - марка-отметка
-# на заранее выделенных элементах: прямоугольный - низ, круглый - ось (lib/elev_marks.py)
+# на заранее выделенных элементах: прямоугольный - низ, круглый - ось (lib/hui_elev_marks.py)
 # ============================================================
 if action_choice == ACTION_PICKSPOT:
     try:
         import sys
-        sys.modules.pop('elev_marks', None)
-        import elev_marks
+        sys.modules.pop('hui_elev_marks', None)
+        import hui_elev_marks
         # 17.10.2026: вместо списка строк — 4 кнопки-картинки 2×2 (hui_forms.pick_spot_side)
         _side = forms.pick_spot_side(u"Отметка на взрыв-схеме")
         if _side:
-            elev_marks.place_selected(doc, uidoc, other_selected, _side,
+            hui_elev_marks.place_selected(doc, uidoc, other_selected, _side,
                                       alert=lambda m: forms.alert(m, title=u"Отметка"))
     except Exception as ex:
         import traceback

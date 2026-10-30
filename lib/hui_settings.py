@@ -3,13 +3,15 @@
 
 Файл %APPDATA%\\pyRevit\\hui_settings.json. Меняются кнопкой «ХОЧУ → Обработчики».
 Ключи:
-  elev_marks_auto — обработчик марок-отметок на взрыв-схемах пересчитывает их при
-                    изменении модели (True/False, по умолчанию True).
+  elev_marks_auto  — обработчик марок-отметок на взрыв-схемах пересчитывает их при
+                     изменении модели (True/False, по умолчанию False: обработчик
+                     регистрируется только когда включён).
+  tab_after_insert — ставить вкладку ХУЙ сразу после «Вставить» (по умолчанию False).
 """
 import io, os, json
 
 PATH = os.path.join(os.environ.get('APPDATA', ''), 'pyRevit', 'hui_settings.json')
-DEFAULTS = {'elev_marks_auto': True}
+DEFAULTS = {'elev_marks_auto': False, 'tab_after_insert': False}
 _cache = {'mtime': None, 'data': None}
 
 

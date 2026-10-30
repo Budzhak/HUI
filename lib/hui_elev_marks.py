@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Марки-отметки на взрыв-схемах (ХУЙ.extension/lib/elev_marks.py).
+Марки-отметки на взрыв-схемах (ХУЙ.extension/lib/hui_elev_marks.py).
 
 Штатная высотная отметка Revit на смещённом элементе (DisplacementElement)
 рисуется в ИСХОДНОМ положении элемента. Поэтому вместо неё ставится марка
@@ -449,6 +449,17 @@ def refresh(doc, tags=None, dmaps=None, moved=None):
 
 
 # ------------------------------------------------------------------ updater
+def _log_error(where):
+    """Ошибки обработчика — в %TEMP%\\hui_errors.log (не глушим молча)."""
+    try:
+        import io as _io, os as _os, traceback as _tb, datetime as _dt
+        p = _os.path.join(_os.environ.get('TEMP', ''), 'hui_errors.log')
+        with _io.open(p, 'a', encoding='utf-8') as fh:
+            fh.write(u'%s hui_elev_marks %s\n%s\n' % (_dt.datetime.now(), where, _tb.format_exc()))
+    except Exception:
+        pass
+
+
 class ElevUpdater(IUpdater):
     def __init__(self, addin_id):
         self._uid = UpdaterId(addin_id, UPDATER_GUID)
@@ -473,7 +484,7 @@ class ElevUpdater(IUpdater):
                 if not hui_settings.get('elev_marks_auto'):
                     return
             except Exception:
-                pass
+                _log_error('settings')
             doc = data.GetDocument()
             if Schema.Lookup(SCHEMA_GUID) is None:
                 return
@@ -499,7 +510,7 @@ class ElevUpdater(IUpdater):
             if todo:
                 refresh(doc, todo, moved=moved)
         except Exception:
-            pass
+            _log_error('updater')
 
 
 def register(addin_id):
@@ -522,6 +533,12 @@ def register(addin_id):
                                Element.GetChangeTypeAny())
     return up
 
+
+def unregister(addin_id):
+    """Снять обработчик (выключатель «Автопилот»)."""
+    uid = UpdaterId(addin_id, UPDATER_GUID)
+    if UpdaterRegistry.IsUpdaterRegistered(uid):
+        UpdaterRegistry.UnregisterUpdater(uid)
 
 def _cat_list(bics):
     from System.Collections.Generic import List as _L

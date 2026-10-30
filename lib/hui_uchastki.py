@@ -11,8 +11,8 @@
   по порядку от наружного блока;
 - у разветвителя в № — номера всех примыкающих участков через «-» (по возрастанию).
 
-    import uchastki
-    rep = uchastki.run(doc, view)        # в открытой транзакции
+    import hui_uchastki
+    rep = hui_uchastki.run(doc, view)        # в открытой транзакции
 """
 import math
 from Autodesk.Revit.DB import (BuiltInCategory, BuiltInParameter, ConnectorType, Domain, Element,
