@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Объёмы пространств — логика кнопки «Захуярить → Объёмы» (db 21.10.2026), аналог ModPlus «Объём помещений».
+"""Объёмы пространств — логика кнопки «Захуярить → Объёмы» (db 21.10.2026).
 
-Объём = DirectShape категории «Обобщённые модели» по геометрии пространства (как у ModPlus, но без частей).
+Объём = DirectShape категории «Обобщённые модели» по геометрии пространства.
 Связь с пространством — ApplicationId = «ХУЙ.Объёмы», ApplicationDataId = UniqueId пространства: повторный
 «Создать» обновляет форму и значения, а не плодит копии. В «Комментарии» объёма пишется «#объём».
 Значения параметров пространства копируются в объём; параметр должен быть привязан к «Обобщённым моделям»
@@ -217,7 +217,7 @@ def our_volumes(doc):
 
 
 def modplus_volumes(doc):
-    """DirectShape без ApplicationId в рабочем наборе ModPlus + части из них: (ds_ids, part_ids)."""
+    """DirectShape без ApplicationId в рабочем наборе зонирования + части из них: (ds_ids, part_ids)."""
     ws = None
     for w in FilteredWorksetCollector(doc).OfKind(WorksetKind.UserWorkset):
         if w.Name == MP_WORKSET:
@@ -241,7 +241,7 @@ def modplus_volumes(doc):
 
 
 def _extrusion(sp):
-    """Выдавливание контура пространства на его высоту (как ModPlus): от уровня + смещение низа."""
+    """Выдавливание контура пространства на его высоту: от уровня + смещение низа."""
     try:
         opt = SpatialElementBoundaryOptions()
         loops = List[CurveLoop]()

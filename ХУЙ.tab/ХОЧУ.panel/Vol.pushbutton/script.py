@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 __title__ = u"Объёмы"
 __author__ = u"db"
-__doc__ = u"""Объёмы пространств и раскраска — аналог ModPlus «Объём помещений», но цвет — фильтрами вида.
+__doc__ = u"""Объёмы пространств и раскраска — цвет фильтрами вида.
 
 1) Пространства: выделенные / на активном виде / все.
-2) Объёмы: создать или обновить (форма + значения параметров пространства), удалить свои, удалить объёмы ModPlus
+2) Объёмы: создать или обновить (форма + значения параметров пространства), удалить свои, удалить сторонние объёмы
    вместе с частями. Перед каждым действием — проба со списком и «Да/Нет».
 3) Раскраска активного вида: параметр → значения с цветами (щелчок по цвету — сменить), прозрачность, «Покрасить».
 Отмена любого действия — Ctrl+Z. Код: lib/hui_vol.py."""
@@ -385,15 +385,15 @@ def do_del_outside(s, e):
 def do_del_mp(s, e):
     ds, parts = v.modplus_volumes(doc)
     if not ds and not parts:
-        status(u'Объёмов ModPlus (рабочий набор «%s») нет.' % v.MP_WORKSET, False)
+        status(u'Сторонних объёмов (рабочий набор «%s») нет.' % v.MP_WORKSET, False)
         return
-    if not ask(u'Удалить объёмы ModPlus «Объём помещений»:\n• частей: %d\n• исходных объёмов (DirectShape в наборе «%s»): %d\n'
+    if not ask(u'Удалить сторонние объёмы «Объём помещений»:\n• частей: %d\n• исходных объёмов (DirectShape в наборе «%s»): %d\n'
                u'\nСами пространства не трогаются. Удалить?' % (len(parts), v.MP_WORKSET, len(ds))):
         return
-    with revit.Transaction(u'ХУЙ: объёмы ModPlus — удалить'):
+    with revit.Transaction(u'ХУЙ: сторонние объёмы — удалить'):
         n1 = v.delete(doc, parts)
         n2 = v.delete(doc, ds)
-    status(u'Удалено частей %d, объёмов ModPlus %d. Отмена — Ctrl+Z.' % (n1, n2))
+    status(u'Удалено частей %d, сторонних объёмов %d. Отмена — Ctrl+Z.' % (n1, n2))
 
 
 p2 = WrapPanel()
@@ -402,7 +402,7 @@ p2.Children.Add(btn(u'Создать / обновить', do_build, u'Объём
 p2.Children.Add(btn(u'Удалить объёмы ХУЙ', do_del_our, u'Только объёмы этой кнопки для выбранных пространств'))
 p2.Children.Add(btn(u'Удалить вне рамок', do_del_outside, u'Объёмы ХУЙ пространств вне отмеченных рамок (другие здания)'))
 mp_ds, mp_parts = v.modplus_volumes(doc)
-bm = btn(u'Удалить объёмы ModPlus (%d + частей %d)' % (len(mp_ds), len(mp_parts)), do_del_mp)
+bm = btn(u'Удалить сторонние объёмы (%d + частей %d)' % (len(mp_ds), len(mp_parts)), do_del_mp)
 bm.IsEnabled = bool(mp_ds or mp_parts)
 p2.Children.Add(bm)
 s2.Children.Add(p2)
