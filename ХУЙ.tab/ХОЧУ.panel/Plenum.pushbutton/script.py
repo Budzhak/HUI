@@ -19,6 +19,9 @@ import clr
 
 from pyrevit import revit, DB, forms, script
 import hui_forms as forms   # единый стиль окон ХУЙ (lib/hui_forms.py)
+import sys
+sys.modules.pop('hui_viewcube', None)
+import hui_viewcube as VC   # видовой куб как в Revit (30.10.2026)
 from Autodesk.Revit.DB.Mechanical import DuctSystemType
 from System.Windows import Thickness, Point, Size
 from System.Windows.Controls import Canvas, TextBlock, Button
@@ -340,6 +343,7 @@ class PlenumWindow(forms.WPFWindow):
         self.busy = False
         self.result = None
         self.yaw, self.pitch, self.zoom = -35.0, 28.0, 1.0
+        self.roll = 0.0
         self.drag = None
         self.auto = set(FACES)      # грани, где врезки расставляются автоматически (ряд, зазор «Между врезками»)
         self.mode = {}              # грань → расстановка: ряд / 2 ряда / 3 ряда / шахматка (по умолчанию ряд)
@@ -350,12 +354,7 @@ class PlenumWindow(forms.WPFWindow):
         for cb, items in ((self.cbFace, FACES), (self.cbShape, SHAPES), (self.cbRole, ROLES)):
             for it in items:
                 cb.Items.Add(it)
-        for name, yw, pt in VIEWS:
-            b = Button()
-            b.Content = name
-            b.Tag = (yw, pt)
-            b.Click += self.on_view
-            self.wpViews.Children.Add(b)
+        # 30.10.2026: кнопки видов заменены видовым кубом в углу превью (как в Revit)
         b = Button(); b.Content = u'Вписать'; b.Click += self.on_fit
         self.wpViews.Children.Add(b)
         self.preset(2)
@@ -866,6 +865,7 @@ class PlenumWindow(forms.WPFWindow):
 
     def on_view(self, sender, e):
         self.yaw, self.pitch = sender.Tag
+        self.roll = 0.0
         self.zoom = 1.0
         self.draw()
 
@@ -899,6 +899,14 @@ class PlenumWindow(forms.WPFWindow):
         p = e.GetPosition(self.cv)
         if abs(p.X - p0.X) + abs(p.Y - p0.Y) < 3:
             tag = getattr(src, 'Tag', None)
+            if isinstance(tag, tuple) and tag and tag[0] == 'cube':      # видовой куб
+                self.yaw, self.pitch, self.roll = VC.look_from(tag[1], self.yaw)
+                self.draw()
+                return
+            if isinstance(tag, tuple) and tag and tag[0] == 'roll':      # стрелки поворота на 90°
+                self.roll = (self.roll + tag[1]) % 360.0
+                self.draw()
+                return
             if isinstance(tag, int) and 0 <= tag < len(self.cuts):
                 if int(Keyboard.Modifiers) & 6:      # Ctrl (2) или Shift (4)
                     idx = self.sel_idx()
@@ -975,13 +983,7 @@ class PlenumWindow(forms.WPFWindow):
 
     # ------------------------------------------------------------ 3D
     def project(self, p):
-        a, b = math.radians(self.yaw), math.radians(self.pitch)
-        x, y, z = p
-        x1 = x * math.cos(a) - y * math.sin(a)
-        y1 = x * math.sin(a) + y * math.cos(a)
-        y2 = y1 * math.cos(b) - z * math.sin(b)
-        z2 = y1 * math.sin(b) + z * math.cos(b)
-        return x1, -z2, y2          # экран x, экран y, глубина (больше — дальше)
+        return VC.project(p, self.yaw, self.pitch, self.roll)   # экран x, экран y, глубина (больше — дальше)
 
     def facing(self, n):
         return -self.project(n)[2]  # >0 — грань смотрит на зрителя
@@ -1074,6 +1076,7 @@ class PlenumWindow(forms.WPFWindow):
         for txt, q in ((u'Ш %s' % fmt(W), (0, -D / 2, -H / 2)), (u'Д %s' % fmt(D), (W / 2, 0, -H / 2)), (u'В %s' % fmt(H), (-W / 2, -D / 2, 0))):
             p, _ = scr(q)
             self.label(txt, p.X + 4, p.Y + 4, C_TXT, 11)
+        VC.draw(cv, self.yaw, self.pitch, self.roll, dark=True)
 
     def label(self, txt, x, y, br, size, center=False):
         t = TextBlock()
