@@ -157,6 +157,13 @@ def part_from(get_str, get_mm, family=u'', type_name=u''):
          'type': type_name, 'mat': get_str(u'ADSK_Материал наименование') or u'',
          'wall': get_mm(u'ADSK_Толщина стенки'), 'code': get_str(u'db_Код конфигурации') or u'',
          'mode': get_str(u'db_Режим') or u'', 'count': 0}
+    # вход / выход воздуха: приточный — основная врезка вход, ответвления выход; вытяжной — наоборот
+    md = p['mode'].lower()
+    if md.startswith(u'приточ') or md.startswith(u'вытяж'):
+        sup = md.startswith(u'приточ')
+        for c in cuts:
+            main = c['role'] == u'Основной'
+            c['flow'] = c['flow_auto'] = 'in' if (main == sup) else 'out'
     for c in cuts:
         o, u, v, n = face_frame(c['face'], bw, bd, bh)
         c['o3'] = vadd(o, vmul(u, c['u']), vmul(v, c['v']))
@@ -166,7 +173,8 @@ def part_from(get_str, get_mm, family=u'', type_name=u''):
 
 
 def default_face(part):
-    """Главный вид — грань с наибольшим числом ответвлений, при равенстве — «Спереди»."""
+    """Главный вид — грань с наибольшим числом ответвлений, при равенстве — «Спереди».
+    Изделие по геометрии (КСД и др., система «как смонтировано») — «Спереди»: верх на эскизе = верх в модели."""
     cnt = dict((f, 0) for f in FACES)
     for c in part['cuts']:
         if c['role'] != u'Основной' and not c.get('full'):
@@ -231,15 +239,26 @@ class Pen(object):
 
     def arc(self, c, r, a0, a1, st='thick'):
         """Дуга против часовой от a0 до a1 (радианы)."""
-        self.p.append({'t': 'arc', 'c': tuple(c), 'r': r, 'a0': a0, 'a1': a1, 'st': st})
+        d = {'t': 'arc', 'c': tuple(c), 'r': r, 'a0': a0, 'a1': a1, 'st': st}
+        self.p.append(d)
+        return d
 
     def fill(self, pts=None, c=None, r=None, kind='gray'):
         self.p.append({'t': 'fill', 'pts': [tuple(q) for q in pts] if pts else None,
                        'c': tuple(c) if c else None, 'r': r, 'kind': kind})
 
-    def dim(self, refs, a, b):
+    def dim(self, refs, a, b, prefix=u''):
         if len(refs) >= 2:
-            self.p.append({'t': 'dim', 'refs': refs, 'a': tuple(a), 'b': tuple(b)})
+            self.p.append({'t': 'dim', 'refs': refs, 'a': tuple(a), 'b': tuple(b), 'prefix': prefix})
+
+    def adim(self, r1, r2, pa, pb, a, b):
+        """Размер Revit между концами двух линий (r = (примитив линии, 0|1)); pa, pb — сами точки (для превью),
+        a → b — положение и направление размерной линии."""
+        self.p.append({'t': 'adim', 'r1': r1, 'r2': r2, 'pa': tuple(pa), 'pb': tuple(pb), 'a': tuple(a), 'b': tuple(b)})
+
+    def rdim(self, arc, pos, kind='R', prefix=u''):
+        """Размер Revit радиуса (kind='R') или диаметра ('D') дуги arc (примитив pen.arc); pos — точка надписи."""
+        self.p.append({'t': 'rdim', 'arc': arc, 'pos': tuple(pos), 'kind': kind, 'prefix': prefix})
 
     def text(self, pos, s, rot=0.0, h=2.5, al='l'):
         self.p.append({'t': 'text', 'pos': tuple(pos), 's': s, 'rot': rot, 'h': h, 'al': al})
@@ -313,10 +332,99 @@ def render(prims, S):
                 out.append(('poly', p['pts'], p['kind']))
             else:
                 out.append(('disc', p['c'], p['r'], p['kind']))
+            if p['kind'] == 'hatch':
+                out.extend(_hatch_segs(p, S))
         elif t == 'text':
             out.append(('text', p))
         elif t == 'dim':
             out.extend(render_dim(p, S))
+        elif t == 'rdim':
+            out.extend(render_rdim(p, S))
+        elif t == 'adim':
+            out.extend(render_adim(p, S))
+    return out
+
+
+def render_adim(p, S):
+    """Превью размера Revit между двумя точками: выносные ⟂ размерной (как рисует Revit), засечки, число."""
+    a, b = p['a'], p['b']
+    d = unit(vsub(b, a))
+    n = perp(d)
+    ta, tb = dot(vsub(p['pa'], a), d), dot(vsub(p['pb'], a), d)
+    out = []
+    for t_, q in ((ta, p['pa']), (tb, p['pb'])):
+        base = vadd(a, vmul(d, t_))
+        e = dot(vsub(q, a), n)
+        sg = 1 if e > 0 else -1
+        out.append(('seg', vadd(base, vmul(n, e - sg * 1.0 * S)), vsub(base, vmul(n, sg * 2 * S)), 'dim'))
+        tk = vmul(unit(vadd(d, n)), 1.5 * S)
+        out.append(('seg', vsub(base, tk), vadd(base, tk), 'dimtick'))
+    lo, hi = min(ta, tb), max(ta, tb)
+    out.append(('seg', vadd(a, vmul(d, lo - 1.5 * S)), vadd(a, vmul(d, hi + 1.5 * S)), 'dim'))
+    ang = math.degrees(math.atan2(d[1], d[0]))
+    if ang > 90.01:
+        ang -= 180
+    if ang <= -89.99:
+        ang += 180
+    up = (-math.sin(math.radians(ang)), math.cos(math.radians(ang)))
+    mid = vadd(a, vmul(d, (lo + hi) / 2))
+    out.append(('text', {'pos': vadd(mid, vmul(up, 3.6 * S)), 's': fmt(hi - lo), 'rot': ang, 'h': 2.5, 'al': 'c',
+                         'dim': True}))
+    return out
+
+
+def _hatch_segs(p, S, step=1.5, ang=45.0):
+    """Линии штриховки 45° (шаг 1,5 мм листа) внутри контура — для превью; в Revit — тип заливки db_Эскиз_Выход."""
+    if p['pts']:
+        poly = p['pts']
+    else:
+        c, r = p['c'], p['r']
+        poly = [(c[0] + r * math.cos(2 * math.pi * i / 48), c[1] + r * math.sin(2 * math.pi * i / 48)) for i in range(48)]
+    a = math.radians(ang)
+    d, n = (math.cos(a), math.sin(a)), (-math.sin(a), math.cos(a))
+    ts = [dot(q, n) for q in poly]
+    h = step * S
+    out = []
+    t = math.floor(min(ts) / h) * h + h
+    while t < max(ts):
+        xs = []
+        for i in range(len(poly)):
+            A, B = poly[i], poly[(i + 1) % len(poly)]
+            ta, tb = dot(A, n), dot(B, n)
+            if (ta - t) * (tb - t) < 0:
+                f = (t - ta) / (tb - ta)
+                xs.append(dot(vadd(A, vmul(vsub(B, A), f)), d))
+        xs.sort()
+        for j in range(0, len(xs) - 1, 2):
+            out.append(('seg', vadd(vmul(n, t), vmul(d, xs[j])), vadd(vmul(n, t), vmul(d, xs[j + 1])), 'thin'))
+        t += h
+    return out
+
+
+def render_rdim(p, S):
+    """Превью радиального / диаметрального размера: линия через центр к точке надписи, стрелка на дуге, текст."""
+    a = p['arc']
+    c, r = a['c'], a['r']
+    u = unit(vsub(p['pos'], c))
+    on = vadd(c, vmul(u, r))
+    out = []
+    st = vsub(c, vmul(u, r)) if p['kind'] == 'D' else c
+    out.append(('seg', st, on, 'dim'))
+    n = perp(u)
+    for sg in ((1, -1) if p['kind'] == 'D' else (1,)):
+        tip = vadd(c, vmul(u, sg * r))
+        b = vsub(tip, vmul(u, sg * 2.5 * S))
+        out.append(('poly', [tip, vadd(b, vmul(n, 0.8 * S)), vsub(b, vmul(n, 0.8 * S))], 'arrow'))
+    val = (u'Ø' + fmt(2 * r)) if p['kind'] == 'D' else (u'R' + fmt(r))
+    ang = math.degrees(math.atan2(u[1], u[0]))
+    if ang > 90.01:
+        ang -= 180
+    if ang <= -89.99:
+        ang += 180
+    up = (-math.sin(math.radians(ang)), math.cos(math.radians(ang)))
+    mid = vadd(c, vmul(u, r * 0.55))                 # надпись внутри дуги, на выноске (как Revit)
+    out.append(('text', {'pos': vadd(mid, vmul(up, 3.6 * S)), 's': (p.get('prefix') or u'') + val, 'rot': ang,
+                         'h': 2.5, 'al': 'c', 'dim': True}))
     return out
 
 
@@ -351,8 +459,8 @@ def render_dim(p, S):
         if ang <= -89.99:
             ang += 180
         up = (-math.sin(math.radians(ang)), math.cos(math.radians(ang)))
-        out.append(('text', {'pos': vadd(mid, vmul(up, 3.6 * S)), 's': fmt(tb - ta), 'rot': ang, 'h': 2.5,
-                             'al': 'c', 'dim': True}))
+        out.append(('text', {'pos': vadd(mid, vmul(up, 3.6 * S)), 's': (p.get('prefix') or u'') + fmt(tb - ta),
+                             'rot': ang, 'h': 2.5, 'al': 'c', 'dim': True}))
     return out
 
 
@@ -379,7 +487,7 @@ def bbox(items, S):
 
 def shift(prims, dx, dy):
     for p in prims:
-        for key in ('a', 'b', 'c', 'pos'):
+        for key in ('a', 'b', 'c', 'pos', 'pa', 'pb'):
             if p.get(key) is not None:
                 p[key] = (p[key][0] + dx, p[key][1] + dy)
         if p.get('pts'):
@@ -412,7 +520,8 @@ def build_ortho(part, key, basis, S):
     for c in part['cuts']:
         if dot(c['n3'], N) > 0.5 and not c.get('full'):
             nlab[c['label']] = nlab.get(c['label'], 0) + 1
-    for c in part['cuts']:
+    # справа налево: размеры одинаковых врезок (R, Ø) — у крайней правой, снаружи группы
+    for c in sorted(part['cuts'], key=lambda c_: -dot(c_['o3'], R)):
         s = dot(c['n3'], N)
         c2 = pj(c['o3'])
         if s > 0.5 or s < -0.5:
@@ -428,47 +537,60 @@ def build_ortho(part, key, basis, S):
                         _rect(pen, c2, hw, hh, 'hidden')
                 continue
             if c.get('full'):                             # вся грань — проём
-                pen.fill(pts=[(-hx, -hy), (hx, -hy), (hx, hy), (-hx, hy)], kind='gray')
+                pen.fill(pts=[(-hx, -hy), (hx, -hy), (hx, hy), (-hx, hy)], kind=fk(c))
                 continue
             ov = 15 * k
+            geo = None
             if c['shape'] == 'c':
                 r = c['d'] / 2.0
-                pen.fill(c=c2, r=r, kind='gray')
-                pen.circle(c2, r, 'thick')
+                pen.fill(c=c2, r=r, kind=fk(c))
+                geo = _circle2(pen, c2, r, 'thick')
                 hw = hh = r
             elif c['shape'] == 'o':
-                pen.fill(pts=stadium_pts(c2, hw, hh), kind='gray')
-                _stadium(pen, c2, hw, hh, 'thick')
+                pen.fill(pts=stadium_pts(c2, hw, hh), kind=fk(c))
+                geo = _stadium(pen, c2, hw, hh, 'thick')
             else:
                 pts = [(c2[0] - hw, c2[1] - hh), (c2[0] + hw, c2[1] - hh), (c2[0] + hw, c2[1] + hh),
                        (c2[0] - hw, c2[1] + hh)]
-                pen.fill(pts=pts, kind='gray')
-                _rect(pen, c2, hw, hh, 'thick')
+                pen.fill(pts=pts, kind=fk(c))
+                geo = _rect(pen, c2, hw, hh, 'thick')
             kx, ky = round(c2[0], 1), round(c2[1], 1)
             va = pen.line((c2[0], c2[1] - hh - ov), (c2[0], c2[1] + hh + ov), 'axis')
             ha = pen.line((c2[0] - hw - ov, c2[1]), (c2[0] + hw + ov, c2[1]), 'axis')
             vaxes.setdefault(kx, va)
             haxes.setdefault(ky, ha)
-            # подпись размера врезки: линия под 45° через центр, стрелки на контуре, полка
+            # размеры врезки — настоящие размеры Revit (не текст): Ø / R по дуге, у овала — между центрами дуг,
+            # у прямоугольника — стороны. Одинаковые врезки образмериваем один раз, Ø — с префиксом «N отв.»
             if c['label'] in done_lab:
                 continue
             done_lab.add(c['label'])
-            lab = (u'%d отв. ' % nlab[c['label']] if nlab.get(c['label'], 1) > 1 else u'') + c['label']
+            pre = u''                                   # db 29.10: без «2 отв.» — одинаковые видны и так
+            q45 = (0.7071, 0.7071)
             if c['shape'] == 'c':
-                q = 0.7071 * r
-                A, Bp = (c2[0] - q, c2[1] - q), (c2[0] + q, c2[1] + q)
-                E = (Bp[0] + 45 * k, Bp[1] + 45 * k)
-                pen.line(A, E, 'thin')
-                pen.tip(c2, Bp)
-                pen.tip(c2, A)
+                pen.rdim(geo[0], vadd(c2, vmul(q45, r + 35 * k)), 'D', pre)
+            elif c['shape'] == 'o' and abs(hw - hh) < 0.5:
+                pen.rdim(geo['arcs'][0], vadd(c2, vmul(q45, hw + 35 * k)), 'D', pre)
+            elif c['shape'] == 'o':
+                lg = geo['long']
+                sh = perp(lg)                                   # поперёк длины
+                rr, (C1, C2) = geo['r'], geo['ctr']
+                # R — на дуге, наружу под 45° от оси длины
+                # дуга 0…90° правого / верхнего торца: Revit ведёт размер через её середину — под 45°
+                pen.rdim(geo['arcs'][0], vadd(C1, vmul(q45, rr + 30 * k)), 'R', pre)
+                # между центрами дуг — короткие осевые через центры, размер со стороны −sh
+                # размер между центрами — со стороны, где до края корпуса больше места (db 29.10: под овалом)
+                half_sh = abs(sh[0]) * hx + abs(sh[1]) * hy
+                pos_sh = dot(c2, sh)
+                sd = 1 if (half_sh - (pos_sh + rr)) > ((pos_sh - rr) + half_sh) else -1
+                sh = vmul(sh, sd)
+                l1 = pen.line(vsub(C1, vmul(sh, rr + ov)), vadd(C1, vmul(sh, rr + 25 * k)), 'axis')
+                l2 = pen.line(vsub(C2, vmul(sh, rr + ov)), vadd(C2, vmul(sh, rr + 25 * k)), 'axis')
+                y = vadd(c2, vmul(sh, rr + 15 * k))
+                pen.dim([l1, l2], vsub(y, vmul(lg, 10 * k)), vadd(y, vmul(lg, 10 * k)))
             else:
-                Bp = (c2[0] + hw * 0.5, c2[1] + hh * 0.5)
-                E = (c2[0] + hw + 45 * k, c2[1] + hh + 45 * k)
-                pen.line(Bp, E, 'thin')
-                pen.dot_end(Bp)
-            sw = max(60 * k, len(lab) * 2.5 * S * TXT_W + 6 * k)
-            pen.line(E, (E[0] + sw, E[1]), 'thin')
-            pen.text((E[0] + 3 * k, E[1] + 1.2 * S + 2.5 * S), lab)
+                bot, rgt, top_, lft = geo
+                pen.dim([lft, rgt], (c2[0] - hw, c2[1] - hh - 18 * k), (c2[0] + hw, c2[1] - hh - 18 * k), pre)
+                pen.dim([bot, top_], (c2[0] + hw + 18 * k, c2[1] - hh), (c2[0] + hw + 18 * k, c2[1] + hh))
             continue
         # «с ребра» — патрубок сбоку
         t2 = pj(c['t3'])
@@ -484,27 +606,33 @@ def build_ortho(part, key, basis, S):
         if c['l'] > 0.5:
             P1, P2 = vadd(c2, vmul(p, hp)), vsub(c2, vmul(p, hp))
             T1, T2 = vadd(t2, vmul(p, hp)), vsub(t2, vmul(p, hp))
-            pen.line(P1, T1)
-            pen.line(P2, T2)
+            g1 = pen.line(P1, T1)
+            g2 = pen.line(P2, T2)
             end = pen.line(T2, T1)
             side_ends[orient].setdefault(round(dot(t2, a) * (1 if orient == 'h' else 1), 1), (end, t2))
             if not c.get('full'):
                 pen.line(vsub(c2, vmul(a, 10 * k)), vadd(t2, vmul(a, 15 * k)), 'axis')
-                # размер Ø / сторона патрубка — выносные от образующих, размерная со стрелками
+                # размер Ø / сторона патрубка — размер Revit между образующими (значение считает Revit)
                 xd = vadd(t2, vmul(a, 75 * k))
-                for sg in (1, -1):
-                    pen.line(vadd(t2, vmul(a, 5 * k), vmul(p, sg * hp)), vadd(xd, vmul(a, 8 * k), vmul(p, sg * hp)), 'thin')
-                pen.line(vsub(xd, vmul(p, hp)), vadd(xd, vmul(p, hp)), 'thin')
-                pen.tip(xd, vadd(xd, vmul(p, hp)))
-                pen.tip(xd, vsub(xd, vmul(p, hp)))
-                lab = c['label'] if c['shape'] == 'c' else fmt(2 * hp)
-                tw = len(lab) * 2.5 * S * TXT_W
-                pen.text_along(xd, p, lab, side=a, shift=-(tw / 2 + 3 * k) if hp > tw / 2 + 6 * k else 0.0)
-                pen.arrow(vadd(t2, vmul(a, 60 * k)), vadd(t2, vmul(a, 3 * k)))
+                pen.dim([g1, g2], vsub(xd, vmul(p, hp)), vadd(xd, vmul(p, hp)), u'Ø' if c['shape'] == 'c' else u'')
+                _flow_mark(pen, c, t2, a, p, hp, 60 * k)
             else:
-                pen.arrow(vadd(t2, vmul(a, 45 * k)), vadd(t2, vmul(a, 3 * k)))
+                _flow_mark(pen, c, t2, a, p, hp, 45 * k)
         else:
-            pen.arrow(vadd(c2, vmul(a, 45 * k)), vadd(c2, vmul(a, 3 * k)))
+            _flow_mark(pen, c, c2, a, p, hp, 45 * k)
+            if not c.get('full'):
+                # проём «с ребра» (щель КСД и т.п.): размер проёма и привязка к граням — цепочкой за стрелкой
+                bw = 2.0 * S                             # короткие засечки краёв проёма — опоры размера
+                e1 = pen.line(vadd(c2, vmul(p, hp)), vadd(c2, vmul(p, hp), vmul(a, bw)), 'thin')
+                e2 = pen.line(vsub(c2, vmul(p, hp)), vadd(vsub(c2, vmul(p, hp)), vmul(a, bw)), 'thin')
+                ed = (bL, bR) if abs(p[0]) > 0.5 else (bB, bT)
+                refs = [ed[0], e1, e2, ed[1]]
+                if hp * 2 >= (2 * hx if abs(p[0]) > 0.5 else 2 * hy) - 1.0:
+                    refs = [ed[0], ed[1]]                # во всю длину — габарит уже есть
+                if len(refs) > 2:
+                    off = vadd(c2, vmul(a, 2 * k + 45 * k + 20 * k))
+                    span = (hx if abs(p[0]) > 0.5 else hy)
+                    pen.dim(refs, vsub(off, vmul(p, span)), vadd(off, vmul(p, span)))
     # ---- размеры: каждый следующий на своей стороне — дальше от вида на 50 (1:5)
     bb = bbox(render(pen.p, S), S)
     ext = {'top': max(bb[3], hy), 'bottom': min(bb[1], -hy), 'left': min(bb[0], -hx), 'right': max(bb[2], hx)}
@@ -538,6 +666,62 @@ def build_ortho(part, key, basis, S):
     return pen.p
 
 
+FLOW_NAMES = [u'авто', u'вход', u'выход', u'не указывать']
+FLOW_KEYS = {u'вход': 'in', u'выход': 'out', u'не указывать': 'none'}
+
+
+def cut_id(c):
+    """Ключ отверстия для настроек (грань и положение на ней, мм)."""
+    return u'%s|%d|%d' % (c['face'], int(round(c['u'])), int(round(c['v'])))
+
+
+def cut_title(c):
+    """Подпись отверстия в окне: грань, форма и размер, патрубок / проём."""
+    kind = u'проём' if c['l'] <= 0.5 else u'патрубок'
+    return u'%s · %s %s' % (c['face'], kind, c['label'] if not c.get('full') else u'во всю грань')
+
+
+def apply_flow(part, ov):
+    """ov: {cut_id: 'in' | 'out' | 'none', 'face:<грань>': 'in' | 'out'} — выбор db; остальное — авто
+    (соединители, _SUP/_RET, db_Режим). 'face:…' — вся грань открыта (вход / выход), задаётся в 3D окна."""
+    part['cuts'] = [c for c in part['cuts'] if not c.get('user')]
+    busy = set(c['face'] for c in part['cuts'] if c.get('full'))
+    for key, v in sorted((ov or {}).items()):
+        if not key.startswith(u'face:') or v not in ('in', 'out', 'open'):
+            continue
+        f = key[5:]
+        if f not in FACES or f in busy:
+            continue
+        su, sv = face_size(f, part['W'], part['D'], part['H'])
+        part['cuts'].append({'face': f, 'role': u'', 'u': su / 2.0, 'v': sv / 2.0, 'l': 0.0, 'shape': 'r', 'w': su,
+                             'h': sv, 'd': su, 'label': u'%s×%s' % (fmt(su), fmt(sv)), 'user': True, 'flow': None,
+                             'flow_auto': None})
+    _finish(part)
+    for c in part['cuts']:
+        if c.get('user'):
+            continue
+        if 'flow_auto' not in c:
+            c['flow_auto'] = c.get('flow')
+        c['flow'] = None          # db 29.10: направление двухстороннее — вход / выход не показываем
+
+
+def fk(c):
+    """Вид заливки отверстия: выход воздуха — штриховка 45°, вход и неизвестно — серая (db 29.10)."""
+    return 'hatch' if c.get('flow') == 'out' else 'gray'
+
+
+def _flow_mark(pen, c, base, a, p, hp, L):
+    """Отверстие «с ребра» — только стрелка потока по оси отверстия (полосу заливки db 29.10 убрать: вход / выход
+    и так видны заливкой «в лоб»): вход — к отверстию, выход — от отверстия наружу, неизвестно — к отверстию."""
+    k = pen.k
+    bw = 0.0
+    near, far = vadd(base, vmul(a, bw + 2 * k)), vadd(base, vmul(a, bw + 2 * k + L))
+    if c.get('flow') == 'out':
+        pen.arrow(near, far)
+    else:
+        pen.arrow(far, near)
+
+
 def stadium_pts(c, hw, hh, n=12):
     """Точки овала (два полукруга + прямые) с полуосями hw, hh — для заливки."""
     if hw >= hh:
@@ -554,30 +738,39 @@ def stadium_pts(c, hw, hh, n=12):
     return pts
 
 
+def _circle2(pen, c, r, st):
+    """Окружность четвертями. Первая — 0…90°: размер Revit (Ø / R) ставится по середине дуги, т.е. под 45°."""
+    return [pen.arc(c, r, math.pi / 2 * i, math.pi / 2 * (i + 1), st) for i in range(4)]
+
+
 def _stadium(pen, c, hw, hh, st):
+    """Овал: {'arcs': [дуга1, дуга2], 'ctr': [центр1, центр2], 'r': радиус, 'long': ось длины (1,0)/(0,1)}."""
     if abs(hw - hh) < 0.5:
-        pen.circle(c, hw, st)
-        return
+        return {'arcs': _circle2(pen, c, hw, st), 'ctr': [c, c], 'r': hw, 'long': (1, 0)}
     if hw >= hh:
         r, dx = hh, hw - hh
         pen.line((c[0] - dx, c[1] - r), (c[0] + dx, c[1] - r), st)
         pen.line((c[0] - dx, c[1] + r), (c[0] + dx, c[1] + r), st)
-        pen.arc((c[0] + dx, c[1]), r, -math.pi / 2, math.pi / 2, st)
-        pen.arc((c[0] - dx, c[1]), r, math.pi / 2, 3 * math.pi / 2, st)
-    else:
-        r, dy = hw, hh - hw
-        pen.line((c[0] - r, c[1] - dy), (c[0] - r, c[1] + dy), st)
-        pen.line((c[0] + r, c[1] - dy), (c[0] + r, c[1] + dy), st)
-        pen.arc((c[0], c[1] + dy), r, 0.0, math.pi, st)
-        pen.arc((c[0], c[1] - dy), r, math.pi, 2 * math.pi, st)
+        a1 = pen.arc((c[0] + dx, c[1]), r, 0.0, math.pi / 2, st)            # правый торец: две четверти
+        pen.arc((c[0] + dx, c[1]), r, -math.pi / 2, 0.0, st)
+        a2 = pen.arc((c[0] - dx, c[1]), r, math.pi / 2, math.pi, st)
+        pen.arc((c[0] - dx, c[1]), r, math.pi, 3 * math.pi / 2, st)
+        return {'arcs': [a1, a2], 'ctr': [(c[0] + dx, c[1]), (c[0] - dx, c[1])], 'r': r, 'long': (1, 0)}
+    r, dy = hw, hh - hw
+    pen.line((c[0] - r, c[1] - dy), (c[0] - r, c[1] + dy), st)
+    pen.line((c[0] + r, c[1] - dy), (c[0] + r, c[1] + dy), st)
+    a1 = pen.arc((c[0], c[1] + dy), r, 0.0, math.pi / 2, st)                # верхний торец: две четверти
+    pen.arc((c[0], c[1] + dy), r, math.pi / 2, math.pi, st)
+    a2 = pen.arc((c[0], c[1] - dy), r, math.pi, 3 * math.pi / 2, st)
+    pen.arc((c[0], c[1] - dy), r, 3 * math.pi / 2, 2 * math.pi, st)
+    return {'arcs': [a1, a2], 'ctr': [(c[0], c[1] + dy), (c[0], c[1] - dy)], 'r': r, 'long': (0, 1)}
 
 
 def _rect(pen, c, hw, hh, st):
+    """→ (низ, право, верх, лево) — линии для размеров."""
     x0, x1, y0, y1 = c[0] - hw, c[0] + hw, c[1] - hh, c[1] + hh
-    pen.line((x0, y0), (x1, y0), st)
-    pen.line((x1, y0), (x1, y1), st)
-    pen.line((x1, y1), (x0, y1), st)
-    pen.line((x0, y1), (x0, y0), st)
+    return (pen.line((x0, y0), (x1, y0), st), pen.line((x1, y0), (x1, y1), st),
+            pen.line((x1, y1), (x0, y1), st), pen.line((x0, y1), (x0, y0), st))
 
 
 # ------------------------------------------------------------------ аксонометрия
@@ -635,20 +828,45 @@ class _Cyl(object):
         return t0 < t1
 
 
+# Аксонометрия без чисел (db 29.10): размеры Revit в косоугольной проекции не ставятся, а число текстом
+# не обновляется и легко разойдётся с изделием. Все размеры — на ортогональных видах. True — вернуть подписи.
+AXO_DIMS = True          # db 29.10: размеры на аксонометрии нужны (габариты, длины патрубков)
+AXO_LABELS = False       # подписи «овал …», «Ø…» на аксонометрии — нет (текст не обновляется; размеры — на видах)
+
+
 def build_axo(part, basis, az, el, S):
     R0, U0, N0 = basis
     el = max(-85.0, min(85.0, el))
-    a_, e_ = math.radians(az), math.radians(el)
-    e3 = unit(vadd(vmul(R0, math.cos(e_) * math.sin(a_)), vmul(N0, math.cos(e_) * math.cos(a_)), vmul(U0, math.sin(e_))))
-    Rx = unit(cross(U0, e3))
-    Up = cross(e3, Rx)
+
+    # Фронтальная изометрия (ГОСТ 2.317): ось X — горизонтально, Z — вертикально, Y — под 45°, коэффициенты 1.
+    # Длины по всем трём осям на листе истинные → размеры Revit на аксонометрии показывают настоящие числа
+    # (db 29.10: на эскизе только размеры Revit, никакого текста и нарисованных размерных линий).
+    # Из 4 направлений оси Y (вправо/влево × вверх/вниз) — то, где видно больше: открытая грань (вес 4), проём (2),
+    # торец патрубка (1). db 29.10: открытая грань пленума должна быть залита на аксонометрии.
+    C45 = math.cos(math.radians(45.0))
+    sx0 = 1 if math.sin(math.radians(az)) >= 0 else -1
+    sy0 = 1 if el >= 0 else -1
+
+    def eye(sx_, sy_, sn_=1):
+        return unit(vadd(vmul(R0, sx_ * C45 * sn_), vmul(U0, sy_ * C45), vmul(N0, sn_)))
+    best = None
+    # sn = −1 — смотрим с обратной стороны (ось X тоже разворачиваем, чтобы не было зеркального изображения)
+    for sn_, sx_, sy_ in [(sn, a_, b_) for sn in (1, -1) for a_, b_ in ((sx0, sy0), (-sx0, sy0), (sx0, -sy0), (-sx0, -sy0))]:
+        e3_ = eye(sx_, sy_, sn_)
+        sc = sum(((4 if c.get('full') else 2) if c['l'] <= 0.5 else 1) for c in part['cuts'] if dot(c['n3'], e3_) > 0.05)
+        if best is None or sc > best[0]:
+            best = (sc, sx_, sy_, sn_)
+    SX, SY, SN = best[1], best[2], best[3]
+    e3 = eye(SX, SY, SN)
+    R0, N0 = vmul(R0, SN), vmul(N0, SN)
     pen = Pen(S)
     k = pen.k
     W, D, H = part['W'], part['D'], part['H']
     hw = (W / 2, D / 2, H / 2)
 
     def pr(p):
-        return (dot(p, Rx), dot(p, Up))
+        t = -dot(p, N0)                              # глубина от зрителя
+        return (dot(p, R0) + SX * t * C45, dot(p, U0) + SY * t * C45)
 
     solids = [_Box(vmul(hw, -1), hw)]
     for c in part['cuts']:
@@ -677,8 +895,9 @@ def build_axo(part, basis, az, el, S):
         """Ребро 3D → видимые (толстые) и невидимые (штрих) куски."""
         L = vlen(vsub(B, A))
         if L < 0.5:
-            return
+            return None
         pts_all.extend([A, B])
+        made = []
         n = max(1, int(L / step))
         st = [visible(vadd(A, vmul(vsub(B, A), (i + 0.5) / n))) for i in range(n)]
         i = 0
@@ -689,10 +908,12 @@ def build_axo(part, basis, az, el, S):
             t0, t1 = i / n, (j + 1) / n
             P0, P1 = vadd(A, vmul(vsub(B, A), t0)), vadd(A, vmul(vsub(B, A), t1))
             if vlen(vsub(P1, P0)) * 1.0 > 0.9:
-                pen.line(pr(P0), pr(P1), 'thick' if st[i] else 'hidden')
+                made.append(pen.line(pr(P0), pr(P1), 'thick' if st[i] else 'hidden'))
             i = j + 1
+        return (made[0], made[-1]) if made else None
 
     # короб
+    box_edges = {}
     for ax in range(3):
         o1, o2 = (ax + 1) % 3, (ax + 2) % 3
         for s1 in (-1, 1):
@@ -701,7 +922,7 @@ def build_axo(part, basis, az, el, S):
                 A[o1], A[o2] = s1 * hw[o1], s2 * hw[o2]
                 B = list(A)
                 A[ax], B[ax] = -hw[ax], hw[ax]
-                edge(tuple(A), tuple(B))
+                box_edges[(tuple(A), tuple(B))] = edge(tuple(A), tuple(B))
 
     def ring(c, cut, nseg):
         if cut['shape'] == 'c':
@@ -714,19 +935,43 @@ def build_axo(part, basis, az, el, S):
         return [vadd(c, vmul(cut['u3'], x), vmul(cut['v3'], y)) for x, y in ((-a, -b), (a, -b), (a, b), (-a, b))]
 
     fills = []
-    for c in part['cuts']:
+    rdone = set()
+    for c in sorted(part['cuts'], key=lambda c_: -dot(c_['t3'], R0)):
         nseg = max(24, min(72, int(math.pi * max(c['w'], c['h']) / (3 * S)))) if c['shape'] in ('c', 'o') else 4
         tip = ring(c['t3'], c, nseg)
-        for q in range(len(tip)):
-            edge(tip[q], tip[(q + 1) % len(tip)])
+        par = c['shape'] in ('c', 'o') and abs(dot(c['n3'], N0)) > 0.99 and not c.get('full')
+        if par:
+            # торец ∥ плоскости главного вида — во фронтальной изометрии без искажения: настоящие дуги,
+            # на них — размер Revit R / Ø (у первой справа, один раз на размер)
+            pts_all.extend(tip)
+            hwa = (abs(dot(c['u3'], R0)) * c['w'] + abs(dot(c['v3'], R0)) * c['h']) / 2.0
+            hha = (abs(dot(c['u3'], U0)) * c['w'] + abs(dot(c['v3'], U0)) * c['h']) / 2.0
+            c2a = pr(c['t3'])
+            sta = 'thick' if visible(c['t3']) else 'hidden'
+            if c['shape'] == 'c':
+                g_ = _circle2(pen, c2a, c['d'] / 2.0, sta)
+                if AXO_DIMS and sta == 'thick' and c['label'] not in rdone:
+                    rdone.add(c['label'])
+                    pen.rdim(g_[0], vadd(c2a, vmul((0.7071, 0.7071), c['d'] / 2.0 + 30 * k)), 'D')
+            else:
+                g_ = _stadium(pen, c2a, hwa, hha, sta)
+                if AXO_DIMS and sta == 'thick' and c['label'] not in rdone:
+                    rdone.add(c['label'])
+                    pen.rdim(g_['arcs'][0], vadd(g_['ctr'][0], vmul((0.7071, 0.7071), g_['r'] + 30 * k)),
+                             'D' if abs(hwa - hha) < 0.5 else 'R')
+        else:
+            for q in range(len(tip)):
+                edge(tip[q], tip[(q + 1) % len(tip)])
         if c['l'] > 0.5:
             if not c.get('full'):
                 base = ring(c['o3'], c, nseg)
                 for q in range(len(base)):
                     edge(base[q], base[(q + 1) % len(base)])
+            gens = c['_gens'] = []
             if c['shape'] == 'r':
                 for q in range(4):
-                    edge(vadd(c['o3'], vsub(tip[q], c['t3'])), tip[q])
+                    A_, B_ = vadd(c['o3'], vsub(tip[q], c['t3'])), tip[q]
+                    gens.append((A_, B_, edge(A_, B_), unit(vsub(tip[q], c['t3']))))
             else:
                 axp = vsub(pr(c['t3']), pr(c['o3']))
                 if vlen(axp) > 0.5:
@@ -745,11 +990,12 @@ def build_axo(part, basis, az, el, S):
                         if d < best[3]:
                             best[1], best[3] = off, d
                     for off in best[:2]:
-                        edge(vadd(c['o3'], off), vadd(c['t3'], off))
+                        A_, B_ = vadd(c['o3'], off), vadd(c['t3'], off)
+                        gens.append((A_, B_, edge(A_, B_), unit(off)))
         if dot(c['n3'], e3) > 0.05 and visible(c['t3']):
-            fills.append([pr(q) for q in tip])
-    for f in fills:
-        pen.p.insert(0, {'t': 'fill', 'pts': f, 'c': None, 'r': None, 'kind': 'gray'})
+            fills.append(([pr(q) for q in tip], fk(c)))
+    for f, kd in fills:
+        pen.p.insert(0, {'t': 'fill', 'pts': f, 'c': None, 'r': None, 'kind': kd})
 
     # ---- размеры по ГОСТ 2.317: выносные ∥ оси, размерная ∥ ребру, засечки, текст вдоль
     hull = _hull([pr(q) for q in pts_all])
@@ -758,7 +1004,17 @@ def build_axo(part, basis, az, el, S):
     def outside(q):
         return not _in_hull(hull, q)
 
+    def rdim(refs, A, B, dr, off):
+        """Размер Revit между концами рёбер (A, B — 3D): размерная ∥ ребру на выносе off по dr."""
+        if not AXO_DIMS or refs is None:
+            return
+        a, b = pr(vadd(A, vmul(dr, off))), pr(vadd(B, vmul(dr, off)))
+        pen.adim((refs[0], 0), (refs[1], 1), pr(A), pr(B), a, b)
+        used.append(vmul(vadd(a, b), 0.5))
+
     def idim(A, B, dr, off, s):
+        if not AXO_DIMS or True:                     # нарисованные размеры (линии + текст) — не используем
+            return
         A1, B1 = vadd(A, vmul(dr, off)), vadd(B, vmul(dr, off))
         pen.line(pr(vadd(A, vmul(dr, 8 * k))), pr(vadd(A1, vmul(dr, 12 * k))), 'thin')
         pen.line(pr(vadd(B, vmul(dr, 8 * k))), pr(vadd(B1, vmul(dr, 12 * k))), 'thin')
@@ -773,9 +1029,10 @@ def build_axo(part, basis, az, el, S):
         used.append(vmul(vadd(a, b), 0.5))
 
     def place(cands, s):
-        """cands: (A, B, dir). Наименьший вынос, при котором размерная целиком вне контура изделия."""
+        """cands: (A, B, dir[, refs]). Наименьший вынос, при котором размерная целиком вне контура изделия."""
         best = None
-        for A, B, dr in cands:
+        for cd in cands:
+            A, B, dr = cd[0], cd[1], cd[2]
             pl = vlen(pr(dr))
             if pl < 0.35:
                 continue
@@ -786,10 +1043,10 @@ def build_axo(part, basis, az, el, S):
                     near = sum(1 for q in used if vlen(vsub(q, mid)) < 60 * k)
                     sc = off * pl / pl + near * 1000 + (0 if dot(dr, e3) <= 0.05 else 30 * k) - (dot(pr(dr), (0, -1)) > 0.5) * 5 * k
                     if best is None or sc < best[0]:
-                        best = (sc, A, B, dr, off)
+                        best = (sc, A, B, dr, off, cd[3] if len(cd) > 3 else None)
                     break
         if best:
-            idim(best[1], best[2], best[3], best[4], s)
+            rdim(best[5], best[1], best[2], best[3], best[4])
 
     E = [(1, 0, 0), (0, 1, 0), (0, 0, 1)]
     for ax in (2, 0, 1):                         # высота, ширина, глубина
@@ -805,7 +1062,7 @@ def build_axo(part, basis, az, el, S):
                 B = list(A)
                 A[ax], B[ax] = -hw[ax], hw[ax]
                 for dr in (d1, d2):
-                    cands.append((tuple(A), tuple(B), dr))
+                    cands.append((tuple(A), tuple(B), dr, box_edges.get((tuple(A), tuple(B)))))
         place(cands, fmt(2 * hw[ax]))
     done = set()
     noz = []
@@ -822,22 +1079,21 @@ def build_axo(part, basis, az, el, S):
             continue
         done.add(kk)
         best = None
-        for vec, hs in ((c['u3'], c['w'] / 2.0), (c['v3'], c['h'] / 2.0)):
-            for sg in (1, -1):
-                dr = vmul(vec, sg)
-                if vlen(pr(dr)) < 0.35:
-                    continue
-                g = vmul(dr, hs)
-                A, B = vadd(c['o3'], g), vadd(c['t3'], g)
+        for A, B, refs, dr in c.get('_gens') or []:
+            if refs is None:
+                continue
+            if vlen(pr(dr)) < 0.35:
+                continue
+            if True:
                 off = 35 * k
                 mid = pr(vadd(vmul(vadd(A, B), 0.5), vmul(dr, off)))
                 hit = sum(1 for c2, h2 in noz if c2 is not c and _in_hull(h2, mid))
                 near = sum(1 for q in used if vlen(vsub(q, mid)) < 50 * k)
                 sc = hit * 10 + near * 5 - unit(pr(dr))[1] - 0.5 * dot(unit(pr(dr)), unit(vsub(pr(c['o3']), (0, 0))))
                 if best is None or sc < best[0]:
-                    best = (sc, A, B, dr, off)
+                    best = (sc, A, B, dr, off, refs)
         if best:
-            idim(best[1], best[2], best[3], best[4], fmt(c['l']))
+            rdim(best[5], best[1], best[2], best[3], best[4])
     # ---- Ø и a×b врезок: линия под 45° в плоскости торца, стрелки на контуре, вынос и полка
     ctr = vmul(vadd(*[pr(q) for q in pts_all]), 1.0 / max(1, len(pts_all)))
     vis_cuts = [c for c in part['cuts'] if not c.get('full') and dot(c['n3'], e3) > 0.1 and visible(c['t3'])]
@@ -846,6 +1102,8 @@ def build_axo(part, basis, az, el, S):
         nlab[c['label']] = nlab.get(c['label'], 0) + 1
     done_lab = set()
     for c in vis_cuts:
+        if not AXO_LABELS:
+            break
         if c['label'] in done_lab:
             continue
         done_lab.add(c['label'])
@@ -921,15 +1179,22 @@ def tt_lines(part):
     out.append(u'Соединения — фальц / заклёпки, швы загерметизировать.')
     if any(c['shape'] == 'c' and c['l'] > 0.5 for c in part['cuts']):
         out.append(u'Патрубки — ниппельные.')
-    ov = sorted(set(c['label'] for c in part['cuts'] if c['shape'] == 'o' and c['l'] > 0.5))
+    ov = [c for c in part['cuts'] if c['shape'] == 'o' and c['l'] > 0.5]
     if ov:
-        out.append(u'Патрубки овальные: ' + u', '.join(ov) + u'.')
+        dd = sorted(set(fmt(c['dn']) for c in ov if c.get('dn')))
+        out.append(u'Патрубки овальные' + (u' под воздуховод Ø' + u', Ø'.join(dd) if dd else u'') +
+                   u'; размеры — по видам.')
     holes = [c for c in part['cuts'] if not c.get('full') and c['l'] <= 0.5]
     if holes:
         out.append(u'Проёмы в стенках: ' + u'; '.join(u'%s — %s' % (FACE_LOW[c['face']], c.get('note') or c['label'])
                                                      for c in holes) + u'.')
     out.append(u'Неуказанные предельные отклонения ±2 мм.')
-    out.append(u'Отверстия (проходные) показаны заливкой и стрелками.')
+    fl = set(c.get('flow') for c in part['cuts'])
+    if 'out' in fl or 'in' in fl:
+        out.append(u'Отверстия (проходные): вход воздуха — серая заливка, стрелка к отверстию; '
+                   u'выход — штриховка, стрелка от отверстия.')
+    else:
+        out.append(u'Отверстия (проходные) показаны заливкой и стрелками.')
     full = [c for c in part['cuts'] if c.get('full') and c['l'] <= 0.5]
     if full:
         out.append(u'Открыто во всю грань: ' + u'; '.join(u'%s — проём %s' % (FACE_LOW[c['face']], c['label']) for c in full) + u'.')
@@ -1133,7 +1398,7 @@ def part_from_boxes(boxes, conns, tol=2.0):
             qq = vsub(q, ctr)
             if dd and vlen(vsub(qq, tip)) < max(w_, h_) / 2.0 + tol:
                 d = dd
-        c = {'face': face, 'role': u'', 'u': cu, 'v': cv, 'l': l_, 'shape': shape, 'w': w_, 'h': h_, 'd': w_}
+        c = {'face': face, 'role': u'', 'u': cu, 'v': cv, 'l': l_, 'shape': shape, 'w': w_, 'h': h_, 'd': w_, 'dn': d}
         if shape == 'c':
             c['label'] = u'Ø' + fmt(w_)
         elif shape == 'o':
@@ -1141,11 +1406,44 @@ def part_from_boxes(boxes, conns, tol=2.0):
         else:
             c['label'] = u'%s×%s' % (fmt(w_), fmt(h_))
         cuts.append(c)
+    _tidy_cuts(cuts, W, D, H)
     ap = []
     for a in approx:
         if a not in ap:
             ap.append(a)
     return {'W': W, 'D': D, 'H': H, 'OW': W, 'OD': D, 'OH': H, 'cuts': cuts, 'ctr': ctr, 'notes': [], 'approx': ap}
+
+
+def _tidy_cuts(cuts, W, D, H, tol=2.0):
+    """Погрешность обмера (поворот экземпляра, дуги) даёт 179 / 180 у одинаковых патрубков и 122 / 123 у
+    симметричных. Одинаковые в пределах 2 мм — к общему (среднему, до 1 мм); почти симметричные — строго."""
+    for key in ('w', 'h', 'l'):
+        for c in cuts:
+            grp = [x for x in cuts if x['shape'] == c['shape'] and all(abs(x[k2] - c[k2]) <= tol for k2 in ('w', 'h', 'l'))]
+            c['_' + key] = round(sum(x[key] for x in grp) / float(len(grp)))
+    for c in cuts:
+        for key in ('w', 'h', 'l'):
+            c[key] = c.pop('_' + key)
+        if c['shape'] == 'c':
+            c['d'] = c['w']
+            c['label'] = u'Ø' + fmt(c['w'])
+        elif c['shape'] == 'o':
+            c['d'] = c['w']
+            c['label'] = u'овал %s×%s' % (fmt(c['w']), fmt(c['h'])) + (u' (Ø%s)' % fmt(c['dn']) if c.get('dn') else u'')
+        else:
+            c['d'] = c['w']
+            c['label'] = u'%s×%s' % (fmt(c['w']), fmt(c['h']))
+    for c in cuts:
+        su, sv = face_size(c['face'], W, D, H)
+        for key, size in (('u', su), ('v', sv)):
+            if abs(c[key] - size / 2.0) <= tol:
+                c[key] = size / 2.0                      # по центру грани
+                continue
+            for x in cuts:
+                if x is not c and x['face'] == c['face'] and abs((x[key] - size / 2.0) + (c[key] - size / 2.0)) <= tol:
+                    m = round((abs(c[key] - size / 2.0) + abs(x[key] - size / 2.0)) / 2.0)
+                    c[key] = size / 2.0 + (m if c[key] > size / 2.0 else -m)
+                    x[key] = size / 2.0 + (m if x[key] > size / 2.0 else -m)
 
 
 def _ksd_slot(p, slot_w, gaps=0.0):
@@ -1160,8 +1458,11 @@ def _ksd_slot(p, slot_w, gaps=0.0):
 
 
 def geo_instance(fi):
-    """Тела (габариты, число цилиндрических граней) и соединители экземпляра в мм координат семейства."""
-    from Autodesk.Revit.DB import Options, ViewDetailLevel, Solid, GeometryInstance, CylindricalFace, PlanarFace, XYZ
+    """Тела (габариты, число цилиндрических граней) и соединители экземпляра в мм, в осях СЕМЕЙСТВА (db 29.10:
+    КСД в модели вставлены на вертикальную плоскость, но изделие — как в семействе: короб 494×52×185, щель снизу).
+    Габарит тела — по точкам его рёбер, дуги — с шагом 5° (габарит Solid.GetBoundingBox у повёрнутого экземпляра
+    раздувается: 632×553 вместо 494×185)."""
+    from Autodesk.Revit.DB import Options, ViewDetailLevel, Solid, GeometryInstance, CylindricalFace, PlanarFace, XYZ, Line
     inv = fi.GetTransform().Inverse
     opt = Options()
     opt.DetailLevel = ViewDetailLevel.Fine
@@ -1174,13 +1475,20 @@ def geo_instance(fi):
                 continue
             if not isinstance(go, Solid) or go.Volume < 1e-9:
                 continue
-            bb = go.GetBoundingBox()
             pts = []
-            for x in (bb.Min.X, bb.Max.X):
-                for y in (bb.Min.Y, bb.Max.Y):
-                    for z in (bb.Min.Z, bb.Max.Z):
-                        q = inv.OfPoint(bb.Transform.OfPoint(XYZ(x, y, z)))
-                        pts.append((q.X * 304.8, q.Y * 304.8, q.Z * 304.8))
+            for e in go.Edges:
+                cv = e.AsCurve()
+                if isinstance(cv, Line):
+                    seq = (cv.GetEndPoint(0), cv.GetEndPoint(1))
+                else:
+                    # дуги и сплайны — 72 точки по параметру: ошибка габарита < 0,1 мм
+                    # (Edge.Tessellate грубее: овал 182 давал 179–180, размеры расходились на 1–3 мм)
+                    seq = [cv.Evaluate(k / 72.0, True) for k in range(73)]
+                for pt in seq:
+                    q = inv.OfPoint(pt)
+                    pts.append((q.X * 304.8, q.Y * 304.8, q.Z * 304.8))
+            if not pts:
+                continue
             ncyl, bad = 0, 0
             for f in go.Faces:
                 if isinstance(f, PlanarFace):
@@ -1208,6 +1516,37 @@ def geo_instance(fi):
     except Exception:
         pass
     return boxes, conns
+
+
+def _geo_flow(fi, p):
+    """Вход / выход у семейств по геометрии: патрубки — по направлению соединителей (In — воздух входит в
+    изделие), щель / проёмы без соединителя — обратное. Нет данных — по имени семейства (_SUP / _RET)."""
+    pat = None
+    try:
+        from Autodesk.Revit.DB import FlowDirectionType
+        dirs = set()
+        for c in fi.MEPModel.ConnectorManager.Connectors:
+            try:
+                if c.Direction == FlowDirectionType.In:
+                    dirs.add('in')
+                elif c.Direction == FlowDirectionType.Out:
+                    dirs.add('out')
+            except Exception:
+                pass
+        if len(dirs) == 1:
+            pat = dirs.pop()
+    except Exception:
+        pass
+    if pat is None:
+        fam = (fi.Symbol.FamilyName or u'').upper()
+        if fam.endswith(u'_SUP') or u'ПРИТОЧ' in fam:
+            pat = 'in'
+        elif fam.endswith(u'_RET') or fam.endswith(u'_EXH') or u'ВЫТЯЖ' in fam:
+            pat = 'out'
+    if pat is None:
+        return
+    for c in p['cuts']:
+        c['flow'] = c['flow_auto'] = pat if c['l'] > 0.5 else ('out' if pat == 'in' else 'in')
 
 
 def _pmm(el, name):
@@ -1239,19 +1578,28 @@ def geo_items(doc, ids):
         p = part_from_boxes(boxes, conns)
         if p is None:
             continue
-        nf = sum(1 for c in p['cuts'] if c['face'] == u'Спереди')
-        if nf > sum(1 for c in p['cuts'] if c['face'] == u'Сзади'):
-            # зеркальный экземпляр — то же изделие: приводим патрубки на заднюю грань
-            mir = lambda q: (-q[0], -q[1], q[2])
-            boxes = [(mir(b[1]), mir(b[0])) + tuple(b[2:]) for b in boxes]
-            boxes = [(tuple(min(b[0][i], b[1][i]) for i in range(3)), tuple(max(b[0][i], b[1][i]) for i in range(3))) + tuple(b[2:])
-                     for b in boxes]
-            conns = [(mir(q), d) for q, d in conns]
-            p = part_from_boxes(boxes, conns)
+        # поворот на 180° в плане (и зеркальный экземпляр симметричного изделия) — то же изделие:
+        # из двух положений берём то, где патрубков сзади больше, при равенстве — по порядку размеров
+        rot = lambda q: (-q[0], -q[1], q[2])
+        boxes2 = [(rot(b[1]), rot(b[0])) + tuple(b[2:]) for b in boxes]
+        boxes2 = [(tuple(min(b[0][i], b[1][i]) for i in range(3)), tuple(max(b[0][i], b[1][i]) for i in range(3))) + tuple(b[2:])
+                  for b in boxes2]
+        p2 = part_from_boxes(boxes2, [(rot(q), d) for q, d in conns])
+
+        def _key(pp):
+            nb = sum(1 for c in pp['cuts'] if c['face'] == u'Сзади')
+            nf = sum(1 for c in pp['cuts'] if c['face'] == u'Спереди')
+            return (nf - nb, sorted((c['face'], round(c['u']), round(c['v'])) for c in pp['cuts']))
+        if p2 is not None and _key(p2) < _key(p):
+            p = p2
+            p['rot180'] = True
         slot = _pmm(fi, u'2_w')
-        _ksd_slot(p, slot)
-        sig = (s.Id.IntegerValue, round(p['W']), round(p['D']), round(p['H']),
-               tuple(sorted((c['face'], round(c['u']), round(c['v']), round(c['w']), round(c['h']), round(c['l'])) for c in p['cuts'])))
+        # щель КСД полосой не рисуем (db 29.10): выход задаётся гранью целиком в 3D окна («Снизу» — выход)
+        _geo_flow(fi, p)
+        p['geo'] = True
+        r2 = lambda x: int(round(x / 2.0))           # допуск 2 мм: огрубление геометрии при повороте экземпляра
+        sig = (s.Id.IntegerValue, r2(p['W']), r2(p['D']), r2(p['H']),
+               tuple(sorted((c['face'], r2(c['u']), r2(c['v']), r2(c['w']), r2(c['h']), r2(c['l'])) for c in p['cuts'])))
         g = groups.get(sig)
         if g is None:
             p['family'], p['type'] = s.FamilyName, u'%s, %s×%s×%s' % (nm(s), fmt(p['W']), fmt(p['D']), fmt(p['H']))
@@ -1335,6 +1683,26 @@ def styles(doc):
             arr.ForegroundPatternId = solid[0].Id
         arr.ForegroundPatternColor = Color(0, 0, 0)
     st['arrow'] = arr.Id
+    # выход воздуха — штриховка 45° (db 29.10): тип «db_Эскиз_Выход», узор чертёжный 45°, 1,5 мм
+    hat = byname.get(u'db_Эскиз_Выход')
+    if hat is None:
+        from Autodesk.Revit.DB import FillPattern, FillPatternHostOrientation, ElementId
+        pats = [q for q in FilteredElementCollector(doc).OfClass(FillPatternElement)
+                if q.GetFillPattern().Target == FillPatternTarget.Drafting and q.Name == u'db_Эскиз_Штриховка 45']
+        if pats:
+            pe = pats[0]
+        else:
+            pe = FillPatternElement.Create(doc, FillPattern(u'db_Эскиз_Штриховка 45', FillPatternTarget.Drafting,
+                                                            FillPatternHostOrientation.ToView, math.radians(45),
+                                                            1.5 / 304.8))
+        hat = gray.Duplicate(u'db_Эскиз_Выход')
+        hat.ForegroundPatternId = pe.Id
+        hat.ForegroundPatternColor = Color(0, 0, 0)
+        try:
+            hat.BackgroundPatternId = ElementId.InvalidElementId
+        except Exception:
+            pass
+    st['hatch'] = hat.Id
     return st
 
 
@@ -1388,6 +1756,7 @@ def emit(doc, view, prims, st):
     def P(q):
         return XYZ(q[0] * F, q[1] * F, 0)
     refs = {}
+    lines = {}
     errs = []
     for p in prims:
         t = p['t']
@@ -1398,6 +1767,7 @@ def emit(doc, view, prims, st):
                 dc = doc.Create.NewDetailCurve(view, Line.CreateBound(P(p['a']), P(p['b'])))
                 dc.LineStyle = st[p['st']]
                 refs[id(p)] = dc.GeometryCurve.Reference
+                lines[id(p)] = dc
             elif t == 'circle':
                 arc = Arc.Create(Plane.CreateByNormalAndOrigin(XYZ.BasisZ, P(p['c'])), p['r'] * F, 0, 2 * math.pi)
                 dc = doc.Create.NewDetailCurve(view, arc)
@@ -1406,6 +1776,7 @@ def emit(doc, view, prims, st):
                 arc = Arc.Create(P(p['c']), p['r'] * F, p['a0'], p['a1'], XYZ.BasisX, XYZ.BasisY)
                 dc = doc.Create.NewDetailCurve(view, arc)
                 dc.LineStyle = st[p['st']]
+                refs[id(p)] = dc.GeometryCurve.Reference
             elif t == 'fill':
                 lp = CurveLoop()
                 if p['pts']:
@@ -1438,7 +1809,61 @@ def emit(doc, view, prims, st):
                     ra.Append(refs[id(r)])
                     n += 1
             if n >= 2:
-                doc.Create.NewDimension(view, Line.CreateBound(P(p['a']), P(p['b'])), ra, st['dim'])
+                dm = doc.Create.NewDimension(view, Line.CreateBound(P(p['a']), P(p['b'])), ra, st['dim'])
+                if p.get('prefix'):
+                    dm.Prefix = p['prefix']
         except Exception as ex:
             errs.append(u'dim: %s' % ex)
+    for p in prims:
+        if p['t'] != 'adim':
+            continue
+        try:
+            ra = ReferenceArray()
+            for ln, end in (p['r1'], p['r2']):
+                el = lines.get(id(ln))
+                if el is None:
+                    raise Exception(u'нет линии для размера')
+                ra.Append(el.GeometryCurve.GetEndPointReference(end))
+            doc.Create.NewDimension(view, Line.CreateBound(P(p['a']), P(p['b'])), ra, st['dim'])
+        except Exception as ex:
+            errs.append(u'axo dim: %s' % ex)
+    for p in prims:
+        if p['t'] != 'rdim':
+            continue
+        try:
+            rf = refs.get(id(p['arc']))
+            if rf is None:
+                continue
+            dm = _radial(doc, view, rf, P(p['pos']), p['kind'], st)
+            if p.get('prefix'):
+                dm.Prefix = p['prefix']
+            # надпись — как ставит Revit: на выноске внутри дуги (db 29.10 поправил так вручную)
+        except Exception as ex:
+            errs.append(u'%s: %s' % (u'Ø' if p['kind'] == 'D' else u'R', ex))
     return errs
+
+
+def _radial(doc, view, ref, pos, kind, st):
+    """Радиальный (R) или диаметральный (Ø) размер Revit по ссылке на дугу.
+    Revit 2025: RadialDimension.Create(doc, view, arcRef, isDiameter) — размер идёт через середину дуги.
+    Тип — одноимённый линейному размеру эскиза (ADSK_Основной_2.5 мм), иначе ближайший по имени, иначе по умолчанию."""
+    from Autodesk.Revit.DB import RadialDimension, FilteredElementCollector, DimensionType, DimensionStyleType
+    dm = RadialDimension.Create(doc, view, ref, kind == 'D')
+    want = DimensionStyleType.Diameter if kind == 'D' else DimensionStyleType.Radial
+    try:
+        base = nm(st['dim']) if st.get('dim') is not None else u''
+        best = None
+        for t in FilteredElementCollector(doc).OfClass(DimensionType):
+            if t.StyleType != want:
+                continue
+            n_ = nm(t)
+            sc = 100 if n_ == base else sum(1 for w in base.replace(u'_', u' ').split() if len(w) > 2 and w in n_)
+            if u'Выноска' in n_ and u'Выноска' not in base:
+                sc -= 1
+            if best is None or sc > best[0]:
+                best = (sc, t)
+        if best is not None and best[0] > 0:
+            dm.DimensionType = best[1]
+    except Exception:
+        pass
+    return dm

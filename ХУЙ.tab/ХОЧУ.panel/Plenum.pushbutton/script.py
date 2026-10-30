@@ -1198,11 +1198,15 @@ def pick_family(base, code):
 
 def load_defs(names):
     orig = app.SharedParametersFilename
-    app.SharedParametersFilename = FOP
+    # ФОП db, если он есть на этом ПК; иначе — файл общих параметров, заданный в Revit (30.10.2026, для GitHub)
+    fop = FOP if os.path.isfile(FOP) else orig
+    if not fop or not os.path.isfile(fop):
+        raise Exception(u'Нет файла общих параметров (ФОП). Задайте его в Revit: Управление → Общие параметры.')
+    app.SharedParametersFilename = fop
     f = app.OpenSharedParameterFile()
     if f is None:
         app.SharedParametersFilename = orig
-        raise Exception(u'Не открылся ФОП: ' + FOP)
+        raise Exception(u'Не открылся ФОП: ' + fop)
     defs = {}
     for g in f.Groups:
         for d in g.Definitions:
@@ -1247,13 +1251,14 @@ SHARED_TYPE = [u'ADSK_Наименование', u'ADSK_Марка', u'ADSK_Ко
                u'ADSK_Единица измерения', u'ADSK_Количество', u'ADSK_Масса', u'ADSK_Материал наименование',
                u'ADSK_Толщина стенки', u'db_Наименование краткое', u'db_Размер']
 SHARED_SIZE = [u'ADSK_Размер_Ширина', u'ADSK_Размер_Высота', u'ADSK_Размер_Длина']
+CUT_SHARED = [u'db_В%d_%s' % (i, s_) for i in range(1, 17) for s_ in (u'Грань', u'Роль', u'Размер', u'U', u'V', u'Длина')]
 
 
 def build_family(cfg, fam_name, type_name, path):
     W, D, H = cfg['W'] * MM, cfg['D'] * MM, cfg['H'] * MM
     tpl = os.path.join(app.FamilyTemplatePath, u'Метрическая система, типовая модель.rft')
     fd = app.NewFamilyDocument(tpl)
-    defs, orig = load_defs(set(SHARED_TYPE + SHARED_SIZE + [u'ADSK_Размер_Площадь', u'ADSK_Примечание']))
+    defs, orig = load_defs(set(SHARED_TYPE + SHARED_SIZE + [u'ADSK_Размер_Площадь', u'ADSK_Примечание'] + CUT_SHARED))
     try:
         t = DB.Transaction(fd, u'Пленум')
         t.Start()
@@ -1319,12 +1324,19 @@ def build_family(cfg, fam_name, type_name, path):
         fm.Set(fm.get_Parameter(u'db_Наименование краткое'), u'Пленум')
         fm.Set(fm.get_Parameter(u'db_Размер'), u'%s×%s×%s' % (fmt(oW), fmt(oH), fmt(oD)))
         fm.Set(fm.AddParameter(CODE_PARAM, DB.GroupTypeId.Data, DB.SpecTypeId.String.Text, False), cfg.get('code', u''))
+        # врезки — ОБЩИЕ параметры db_Вi_* из ФОП (группа «db_Пленум», 29.10.2026): их видит спецификация
+        # «Врезки пленумов» («Эскиз»); нет в ФОП — как раньше, параметр семейства
+        def cut_par(name, grp, spec):
+            d = defs.get(name)
+            if d is not None:
+                return fm.AddParameter(d, grp, False)
+            return fm.AddParameter(name, grp, spec, False)
         for i, c in enumerate(cfg['cuts']):
             pre = u'db_В%d_' % (i + 1)
             for suf, val in ((u'Грань', c['face']), (u'Роль', c['role']), (u'Размер', cut_label(c))):
-                fm.Set(fm.AddParameter(pre + suf, DB.GroupTypeId.Data, DB.SpecTypeId.String.Text, False), val)
+                fm.Set(cut_par(pre + suf, DB.GroupTypeId.Data, DB.SpecTypeId.String.Text), val)
             for suf, val in ((u'U', c['u']), (u'V', c['v']), (u'Длина', c['l'])):
-                fm.Set(fm.AddParameter(pre + suf, DB.GroupTypeId.Geometry, DB.SpecTypeId.Length, False), val * MM)
+                fm.Set(cut_par(pre + suf, DB.GroupTypeId.Geometry, DB.SpecTypeId.Length), val * MM)
         t.Commit()
         app.SharedParametersFilename = orig
         if not os.path.isdir(OUT_DIR):

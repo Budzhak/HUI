@@ -132,6 +132,7 @@ def check_window():
         b.IsCancel = canc
         b.Click += h
         dlg.footer.Children.Add(b)
+    forms.adaptive(dlg, 'uchastki')
     dlg.ShowDialog()
 
 

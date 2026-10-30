@@ -287,6 +287,7 @@ def pick_groups(doc, ids, title, subtitle=None, ok_text=u"Готово", checked
     btn_ok[0] = dlg.add_button(ok_text, '__ok__', primary=True)
     refresh()
     dlg.Loaded += lambda s, e: search.Focus()
+    forms.adaptive(dlg, 'pick')
     dlg.ShowDialog()
     if dlg.response != '__ok__':
         return None

@@ -513,6 +513,11 @@ def short_name(li):
 class OpacityWindow(forms.WPFWindow):
     def __init__(self, handler, event):
         forms.WPFWindow.__init__(self, XAML, literal_string=True)
+        try:
+            import hui_forms as _hf
+            _hf.adaptive(self, 'linkopacity')
+        except Exception:
+            pass
         self.handler, self.event = handler, event
         handler.win = self
         self.busy = False

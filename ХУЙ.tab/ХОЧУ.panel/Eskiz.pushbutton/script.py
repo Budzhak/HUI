@@ -18,17 +18,21 @@ import System
 from pyrevit import revit, DB
 import hui_forms as forms
 sys.modules.pop('hui_eskiz', None)
+sys.modules.pop('hui_eskiz_v', None)
 import hui_eskiz as E
+import hui_eskiz_v as V
+import hui_eskiz_lg as LG
 
 from System.Windows import (Thickness, Visibility, HorizontalAlignment, VerticalAlignment, FontWeights, TextWrapping,
-                            ResizeMode, SizeToContent, GridLength, GridUnitType, Point)
+                            ResizeMode, SizeToContent, GridLength, GridUnitType, Point, TextTrimming)
+from System.Windows.Threading import DispatcherPriority
 from System.Windows.Controls import (StackPanel, WrapPanel, TextBlock, CheckBox, RadioButton, ComboBox, TextBox, Button,
                                      Border, ScrollViewer, ScrollBarVisibility, Orientation, Grid, ColumnDefinition,
                                      ListBox, Canvas, GridSplitter, SelectionMode)
 from System.Windows.Media import (SolidColorBrush, Color, ScaleTransform, RotateTransform, TranslateTransform,
                                   TransformGroup, DoubleCollection, PointCollection)
 from System.Windows.Shapes import Line as WLine, Ellipse, Polygon
-from System.Windows.Input import Keyboard, ModifierKeys, Key
+from System.Windows.Input import Keyboard, ModifierKeys, Key, Cursors
 
 doc = revit.doc
 uidoc = revit.uidoc
@@ -41,12 +45,14 @@ except Exception:
     hui_settings = None
     CFG = {}
 FACES_CFG = dict(CFG.get('faces') or {})
+FLOW_CFG = dict(CFG.get('flow') or {})          # {ключ изделия: {отверстие: 'in' | 'out' | 'none'}} — выбор db
 
 
 def save_cfg():
     if hui_settings is None:
         return
     CFG['faces'] = FACES_CFG
+    CFG['flow'] = FLOW_CFG
     try:
         hui_settings.set('eskiz', CFG)
     except Exception:
@@ -97,6 +103,7 @@ def is_sel(it):
 
 
 def opt_of(it):
+    E.apply_flow(it['part'], FLOW_CFG.get(it['key']))
     f = FACES_CFG.get(it['key'])
     o = {'views': list(CFG.get('views', E.DEFAULT_OPT['views'])), 'axo': CFG.get('axo', True),
          'az': float(CFG.get('az', 35.0)), 'el': float(CFG.get('el', 30.0)), 'axo_pos': CFG.get('axo_pos', 'middle')}
@@ -259,31 +266,138 @@ W = {'cur': None, 'rows': []}
 
 # 1. изделия
 b1, s1 = section(u'1. Изделия (пленумы + выделенное)')
-lb = ListBox()
-lb.MaxHeight = 220
-lb.SelectionMode = SelectionMode.Single
-for it in ITEMS:
+# строки как в «Распознать»: Border + щелчок мышью (ListBox с CheckBox внутри глотал щелчок — выбор только стрелками)
+rows_panel = StackPanel()
+rows_sv = ScrollViewer()
+rows_sv.MaxHeight = 220
+rows_sv.VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+rows_sv.Content = rows_panel
+rows_bd = Border()
+rows_bd.BorderBrush = B(forms.LINE)
+rows_bd.BorderThickness = Thickness(1)
+rows_bd.Child = rows_sv
+ROWS = []          # (border, it, cb)
+MARK = {}          # id(it) → TextBlock «✓ эскиз»
+LAST = [None]
+
+
+def paint_row(r, it, cb, hover=False):
+    if W.get('cur') is it:
+        r.Background = B('#C8E6C9')
+    elif hover:
+        r.Background = B('#F1F8F2')
+    elif cb.IsChecked:
+        r.Background = B('#E8F5E9')
+    else:
+        r.Background = B('#FFFFFF')
+
+
+def repaint_rows():
+    for r, it, cb in ROWS:
+        paint_row(r, it, cb)
+
+
+def make_row(it):
+    g = Grid()
+    for w in (GridLength(24), GridLength(1, GridUnitType.Star), GridLength.Auto):
+        cd = ColumnDefinition()
+        cd.Width = w
+        g.ColumnDefinitions.Add(cd)
     cb = CheckBox()
-    n_ = it['part']['count']
-    cb.Content = it['label']
     cb.IsChecked = is_sel(it)
-    cb.Tag = it
-    cb.Margin = Thickness(0, 1, 0, 1)
-    lb.Items.Add(cb)
+    cb.VerticalAlignment = VerticalAlignment.Center
+    cb.ToolTip = u'Включить в эскизы'
+    g.Children.Add(cb)
+    t = TextBlock()
+    t.Text = it['label']
+    t.VerticalAlignment = VerticalAlignment.Center
+    t.TextTrimming = TextTrimming.CharacterEllipsis
+    t.ToolTip = it['label']
+    Grid.SetColumn(t, 1)
+    g.Children.Add(t)
+    mk = TextBlock()
+    mk.Foreground = B(forms.GREEN)
+    mk.FontSize = 11
+    mk.Margin = Thickness(8, 0, 0, 0)
+    mk.VerticalAlignment = VerticalAlignment.Center
+    mk.ToolTip = u'В проекте уже есть легенда-эскиз этого изделия'
+    Grid.SetColumn(mk, 2)
+    g.Children.Add(mk)
+    MARK[id(it)] = mk
+    r = Border()
+    r.Padding = Thickness(6, 3, 6, 3)
+    r.BorderBrush = B(forms.LINE)
+    r.BorderThickness = Thickness(0, 0, 0, 1)
+    r.Cursor = Cursors.Hand
+    r.Child = g
+
+    def on_click(s_, e_, r=r, it=it, cb=cb):
+        from System.Windows.Media import VisualTreeHelper
+        o_ = e_.OriginalSource
+        while o_ is not None and o_ is not r:
+            if o_ is cb:
+                return                               # щелчок по галочке — только включить/выключить
+            try:
+                o_ = VisualTreeHelper.GetParent(o_)
+            except Exception:
+                o_ = getattr(o_, 'Parent', None)
+        cur = next(i for i, x in enumerate(ROWS) if x[0] is r)
+        if (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift and LAST[0] is not None:
+            a, b_ = sorted((LAST[0], cur))
+            st_ = not cb.IsChecked
+            for x in ROWS[a:b_ + 1]:
+                x[2].IsChecked = st_
+            repaint_rows()
+            return
+        LAST[0] = cur
+        select_item(it)
+    r.MouseLeftButtonUp += on_click
+    r.MouseEnter += lambda s_, e_, r=r, it=it, cb=cb: paint_row(r, it, cb, True)
+    r.MouseLeave += lambda s_, e_, r=r, it=it, cb=cb: paint_row(r, it, cb)
+    cb.Click += lambda s_, e_, r=r, it=it, cb=cb: paint_row(r, it, cb)
+    paint_row(r, it, cb)
+    rows_panel.Children.Add(r)
+    ROWS.append((r, it, cb))
     W['rows'].append((it, cb))
-s1.Children.Add(lb)
+
+
+for it in ITEMS:
+    make_row(it)
+rows_bd.Focusable = True
+
+
+def on_rows_key(s_, e_):
+    if W.get('cur') is None or e_.Key not in (Key.Up, Key.Down, Key.Space):
+        return
+    i = next(i for i, x in enumerate(ROWS) if x[1] is W['cur'])
+    if e_.Key == Key.Space:
+        ROWS[i][2].IsChecked = not ROWS[i][2].IsChecked
+        repaint_rows()
+    else:
+        j = max(0, min(len(ROWS) - 1, i + (1 if e_.Key == Key.Down else -1)))
+        if j != i:
+            select_item(ROWS[j][1])
+            ROWS[j][0].BringIntoView()
+    e_.Handled = True
+
+
+rows_bd.PreviewKeyDown += on_rows_key
+s1.Children.Add(rows_bd)
 p1 = hpanel(Thickness(0, 6, 0, 0))
 
 
 def set_all(v):
     for it, cb in W['rows']:
         cb.IsChecked = v(it)
+    repaint_rows()
 
 
 p1.Children.Add(btn(u'Все', lambda s, e: set_all(lambda it: True)))
 p1.Children.Add(btn(u'Ничего', lambda s, e: set_all(lambda it: False)))
 p1.Children.Add(btn(u'Выделенные', lambda s, e: set_all(is_sel),
                     tip=u'Отметить типоразмеры элементов, выделенных в модели'))
+p1.Children.Add(btn(u'С эскизом', lambda s, e: set_all(has_sketch),
+                    tip=u'Отметить изделия, у которых уже есть легенда-эскиз, — «Создать» пересоберёт их все'))
 s1.Children.Add(p1)
 s1.Children.Add(txt(u'Щелчок по строке — показать в превью и настроить главный вид. Пленумы — из модели; КСД и другие '
                     u'семейства — из выделенного перед запуском (корпус и патрубки по геометрии; «⚠ приблизительно» — '
@@ -300,8 +414,20 @@ p2.Children.Add(txt(u'Повернуть', margin=Thickness(0, 3, 6, 0)))
 cb_rot = combo([u'0°', u'90°', u'180°', u'270°'], u'0°', 70)
 p2.Children.Add(cb_rot)
 s2.Children.Add(p2)
-s2.Children.Add(txt(u'По умолчанию — грань с наибольшим числом ответвлений. Выбор запоминается для конфигурации '
-                    u'(db_Код конфигурации).', muted=True, size=11))
+s2.Children.Add(txt(u'По умолчанию — грань с наибольшим числом ответвлений (КСД и другие по геометрии — «Спереди», '
+                    u'как смонтировано). Выбор запоминается для конфигурации (db_Код конфигурации).', muted=True, size=11))
+s2.Children.Add(txt(u'Открытые грани', bold=True, margin=Thickness(0, 10, 0, 2)))
+cv3_border = Border()
+cv3_border.BorderBrush = B(u'#C8D3CA')
+cv3_border.BorderThickness = Thickness(1)
+cv3_border.Height = 260
+cv3 = Canvas()
+cv3.Background = B(u'#FFFFFF')
+cv3.ClipToBounds = True
+cv3_border.Child = cv3
+s2.Children.Add(cv3_border)
+s2.Children.Add(txt(u'Навести на грань и щёлкнуть — открыть / закрыть. Тянуть — повернуть, колесо — приблизить.',
+                    muted=True, size=11))
 root.Children.Add(b2)
 
 # 3. виды
@@ -355,10 +481,11 @@ root.Children.Add(b3)
 # 4. куда
 b4, s4 = section(u'4. Куда')
 r_each = RadioButton()
-r_each.Content = u'Легенда на каждый типоразмер'
+r_each.Content = u'Легенда на каждое изделие: компоненты легенды, размеры Revit'
 r_one = RadioButton()
 r_one.Content = u'Одна легенда со всеми отмеченными (сводная / своя)'
-(r_one if CFG.get('target') == 'one' else r_each).IsChecked = True
+r_each.IsChecked = True
+r_one.Visibility = Visibility.Collapsed
 s4.Children.Add(r_each)
 p4 = hpanel(Thickness(18, 2, 0, 6))
 p4.Children.Add(txt(u'имя: префикс', margin=Thickness(0, 3, 6, 0)))
@@ -377,9 +504,11 @@ tb_one.Text = CFG.get('one_name', u'Эскизы_сводная')
 tb_one.MinWidth = 0
 tb_one.Width = 220
 p4b.Children.Add(tb_one)
+p4b.Visibility = Visibility.Collapsed
 s4.Children.Add(p4b)
-s4.Children.Add(txt(u'Легенда с таким именем уже есть — она очищается и рисуется заново. Новая легенда — копия любой '
-                    u'легенды проекта без содержимого (API не создаёт легенду с нуля).', muted=True, size=11))
+s4.Children.Add(txt(u'Легенда «префикс + семейство»: главный вид и виды по разделу 3 — компоненты легенды с размерами '
+                    u'Revit, аксонометрия — 3D-компонент. В модели ничего не создаётся. Есть такая легенда — '
+                    u'пересобирается («✓ эскиз» в списке; «С эскизом» — отметить все такие).', muted=True, size=11))
 root.Children.Add(b4)
 
 
@@ -433,7 +562,7 @@ def draw_preview():
                 if dash:
                     el.StrokeDashArray = DoubleCollection([float(x) for x in dash])
             else:
-                el.Fill = GRAY if itm[3] == 'gray' else INK
+                el.Fill = GRAY if itm[3] == 'gray' else (None if itm[3] == 'hatch' else INK)   # штриховка — линиями
             cv.Children.Add(el)
         elif t == 'poly':
             pg = Polygon()
@@ -441,8 +570,8 @@ def draw_preview():
             for q in itm[1]:
                 pc.Add(Point(X(q), Y(q)))
             pg.Points = pc
-            pg.Fill = GRAY if itm[2] == 'gray' else INK
-            cv.Children.Insert(0, pg) if itm[2] == 'gray' else cv.Children.Add(pg)
+            pg.Fill = GRAY if itm[2] == 'gray' else (None if itm[2] == 'hatch' else INK)   # штриховка — линиями
+            cv.Children.Insert(0, pg) if itm[2] in ('gray', 'hatch') else cv.Children.Add(pg)
         elif t == 'text':
             d = itm[1]
             tb = TextBlock()
@@ -471,6 +600,255 @@ def refresh(*a):
         draw_preview()
     except Exception as ex:
         W['sc_note'].Text = u'превью не построено: %s' % ex
+    try:
+        draw3d()
+    except Exception as ex:
+        W['sc_note'].Text = u'3D не построено: %s' % ex
+
+
+AUTO_RU = {'in': u'вход', 'out': u'выход', None: u'не определено'}
+V3 = {'yaw': -35.0, 'pitch': 25.0, 'zoom': 1.0, 'drag': None}
+RGB_OPEN, RGB_BOX, RGB_HL = (70, 110, 150), (200, 214, 203), (255, 204, 128)
+
+
+def _shade(rgb, lit, a=255):
+    return SolidColorBrush(Color.FromArgb(a, *[int(max(0, min(255, c * lit))) for c in rgb]))
+
+
+def _proj(p):
+    a, b = math.radians(V3['yaw']), math.radians(V3['pitch'])
+    x, y, z = p
+    x1 = x * math.cos(a) - y * math.sin(a)
+    y1 = x * math.sin(a) + y * math.cos(a)
+    y2 = y1 * math.cos(b) - z * math.sin(b)
+    z2 = y1 * math.sin(b) + z * math.cos(b)
+    return x1, -z2, y2
+
+
+def _facing(n):
+    return -_proj(n)[2]
+
+
+def set_flow(cid, v):
+    it = W['cur']
+    if it is None:
+        return
+    d = FLOW_CFG.setdefault(it['key'], {})
+    if v:
+        d[cid] = v
+    else:
+        d.pop(cid, None)
+    save_cfg()
+    refresh()
+
+
+def flow_menu(pg, c=None, face=None):
+    try:
+        _flow_menu(pg, c, face)
+    except Exception as ex:
+        forms.alert(u'Меню входа / выхода не открылось: %s' % ex, title=u'Эскиз')
+
+
+def _flow_menu(pg, c=None, face=None):
+    """Правый щелчок: по отверстию — вход / выход / не указывать / авто; по грани (или открытой целиком грани) —
+    «вся грань — вход / выход / закрыта»."""
+    from System.Windows.Controls import ContextMenu, MenuItem
+    cm = ContextMenu()
+    if c is not None and c.get('user'):
+        face, c = c['face'], None
+    if c is not None:
+        return                                   # патрубки — из семейства, менять нечего
+    cid = u'face:' + face
+    items = ((u'Открыта (отверстие во всю грань)', 'open'), (u'Закрыта', None))
+    head = u'Грань «%s»' % face
+    cur = (FLOW_CFG.get(W['cur']['key']) or {}).get(cid)
+    if cur in ('in', 'out'):
+        cur = 'open'
+    for title, v in items:
+        mi = MenuItem()
+        mi.Header = title
+        mi.IsCheckable = True
+        mi.IsChecked = (cur == v)
+
+        def on_click(s_, e_, v=v):
+            set_flow(cid, v)
+        mi.Click += on_click
+        cm.Items.Add(mi)
+    hd = MenuItem()
+    hd.Header = head
+    hd.IsEnabled = False
+    cm.Items.Insert(0, hd)
+    cm.PlacementTarget = pg
+    cm.IsOpen = True
+
+
+def draw3d():
+    cv3.Children.Clear()
+    W['tags'] = []
+    it = W['cur']
+    Wd, Hd = cv3.ActualWidth, cv3.ActualHeight
+    if it is None or Wd < 30 or Hd < 30:
+        return
+    pt = it['part']
+    Wb, Db, Hb = pt['W'], pt['D'], pt['H']
+    polys = []                 # (группа, точки, rgb, яркость, срез или None)
+    allp = []
+    for f in E.FACES:
+        o, u, v, n = E.face_frame(f, Wb, Db, Hb)
+        su, sv = E.face_size(f, Wb, Db, Hb)
+        pts = [o, E.vadd(o, E.vmul(u, su)), E.vadd(o, E.vmul(u, su), E.vmul(v, sv)), E.vadd(o, E.vmul(v, sv))]
+        allp += pts
+        fc = _facing(n)
+        opened = any(c.get('full') and c['face'] == f and c['l'] <= 0.5 for c in pt['cuts'])
+        if fc > 0:
+            polys.append((1, pts, RGB_OPEN if opened else RGB_BOX, 0.6 + 0.4 * fc, f))
+    for c in pt['cuts']:
+        rgb = RGB_OPEN
+        if c.get('full') and c['l'] <= 0.5:
+            continue                                 # открытая грань — сама грань короба цветом отверстия
+        if c.get('full'):
+            o, u, v, n = E.face_frame(c['face'], Wb, Db, Hb)
+            su, sv = E.face_size(c['face'], Wb, Db, Hb)
+            ring = [E.vadd(E.vmul(u, x), E.vmul(v, y)) for x, y in ((-su / 2, -sv / 2), (su / 2, -sv / 2), (su / 2, sv / 2), (-su / 2, sv / 2))]
+        elif c['shape'] in ('c', 'o'):
+            ring = [E.vadd(E.vmul(c['u3'], x), E.vmul(c['v3'], y)) for x, y in E.stadium_pts((0, 0), c['w'] / 2.0, c['h'] / 2.0, 10)]
+        else:
+            hw, hh = c['w'] / 2.0, c['h'] / 2.0
+            ring = [E.vadd(E.vmul(c['u3'], x), E.vmul(c['v3'], y)) for x, y in ((-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh))]
+        n = c['n3']
+        base, tip = c['o3'], c['t3']
+        front = _facing(n) > 0
+        grp = 2 if front else 0
+        m = len(ring)
+        if c['l'] > 0.5:
+            for i in range(m):
+                a0, a1 = ring[i], ring[(i + 1) % m]
+                nn = E.unit(E.vadd(a0, a1)) if E.vlen(E.vadd(a0, a1)) > 1e-6 else n
+                if _facing(nn) <= 0:
+                    continue
+                polys.append((grp, [E.vadd(base, a0), E.vadd(base, a1), E.vadd(tip, a1), E.vadd(tip, a0)],
+                              RGB_BOX, 0.55 + 0.45 * _facing(nn), None))
+        cap = [E.vadd(tip, a) for a in ring]
+        allp += cap
+        polys.append((grp + 0.5 if front else 0.5, cap, rgb, 1.0 if front else 0.6, c))
+    pr = [_proj(q) for q in allp]
+    minx, maxx = min(q[0] for q in pr), max(q[0] for q in pr)
+    miny, maxy = min(q[1] for q in pr), max(q[1] for q in pr)
+    k = min((Wd - 60) / max(1e-6, maxx - minx), (Hd - 60) / max(1e-6, maxy - miny)) * V3['zoom']
+    cx, cy = (minx + maxx) / 2.0, (miny + maxy) / 2.0
+
+    def scr(q):
+        r = _proj(q)
+        return Point(Wd / 2 + (r[0] - cx) * k, Hd / 2 + (r[1] - cy) * k)
+    polys.sort(key=lambda t: (t[0], -sum(_proj(q)[2] for q in t[1]) / len(t[1])))
+    edge = B(u'#55635A')
+    for grp, pts, rgb, lit, c in polys:
+        pg = Polygon()
+        for q in pts:
+            pg.Points.Add(scr(q))
+        pg.Fill = _shade(rgb, lit, 235 if not isinstance(c, dict) else 255)
+        pg.Stroke, pg.StrokeThickness = edge, (1.4 if isinstance(c, dict) else 0.8)
+        if isinstance(c, (str, unicode)):            # грань короба
+            pg.ToolTip = u'Грань «%s» — щелчок: открыть / закрыть' % c
+            pg.Cursor = Cursors.Hand
+
+            def on_in(s_, e_, pg=pg):
+                W['hl'] = (pg, pg.Fill, pg.Stroke, pg.StrokeThickness)
+                pg.Fill = _shade(RGB_HL, 1.0, 255)
+                pg.Stroke, pg.StrokeThickness = B(u'#E65100'), 2.5
+
+            def on_out(s_, e_, pg=pg):
+                h = W.get('hl')
+                if h and h[0] is pg:
+                    pg.Fill, pg.Stroke, pg.StrokeThickness = h[1], h[2], h[3]
+                    W['hl'] = None
+            pg.MouseEnter += on_in
+            pg.MouseLeave += on_out
+            W['tags'].append((pg, None, c))
+            pg.Tag = len(W['tags']) - 1
+
+            def on_rcf(s_, e_, f=c, pg=pg):
+                e_.Handled = True
+                flow_menu(pg, face=f)
+            pg.MouseRightButtonUp += on_rcf
+        elif c is not None:
+            pg.Cursor = Cursors.Hand
+            pg.ToolTip = E.cut_title(c)
+            W['tags'].append((pg, c, None))
+            pg.Tag = len(W['tags']) - 1
+
+            def on_rc(s_, e_, c=c, pg=pg):
+                e_.Handled = True
+                flow_menu(pg, c)
+            pg.MouseRightButtonUp += on_rc
+        cv3.Children.Add(pg)
+    # подписи граней
+    for f in E.FACES:
+        o, u, v, n = E.face_frame(f, Wb, Db, Hb)
+        if _facing(n) > 0.3:
+            su, sv = E.face_size(f, Wb, Db, Hb)
+            q = scr(E.vadd(o, E.vmul(u, su / 2), E.vmul(v, sv / 2)))
+            t = TextBlock()
+            t.Text, t.FontSize, t.Foreground, t.IsHitTestVisible = f, 10, B(forms.MUTE), False
+            Canvas.SetLeft(t, q.X - 20)
+            Canvas.SetTop(t, q.Y - 7)
+            cv3.Children.Add(t)
+
+
+def on3_down(s_, e_):
+    V3['drag'] = e_.GetPosition(cv3)
+    V3['start'] = V3['drag']
+    V3['src'] = e_.OriginalSource
+    cv3.CaptureMouse()
+
+
+def on3_move(s_, e_):
+    if V3['drag'] is None:
+        return
+    p = e_.GetPosition(cv3)
+    p0 = V3.get('start')
+    if p0 is not None and abs(p.X - p0.X) + abs(p.Y - p0.Y) <= 4:
+        return                                   # ещё щелчок, не поворот
+    V3['yaw'] += (p.X - V3['drag'].X) * 0.5
+    V3['pitch'] = max(-89.0, min(89.0, V3['pitch'] + (p.Y - V3['drag'].Y) * 0.5))
+    V3['drag'] = p
+    draw3d()
+
+
+def on3_up(s_, e_):
+    V3['drag'] = None
+    cv3.ReleaseMouseCapture()
+    p0, p1 = V3.get('start'), e_.GetPosition(cv3)
+    if p0 is None or abs(p1.X - p0.X) + abs(p1.Y - p0.Y) > 4:
+        return                                   # тянули — поворот, не щелчок
+    src = V3.get('src')
+    i = getattr(src, 'Tag', None) if isinstance(src, Polygon) else None
+    tags = W.get('tags') or []
+    if not isinstance(i, int) or not (0 <= i < len(tags)):
+        return
+    pg, c, f = tags[i]
+    if c is not None and c.get('user'):
+        f = c['face']
+    if f is None:
+        return                                   # патрубок — из семейства
+    cid = u'face:' + f
+    cur = (FLOW_CFG.get(W['cur']['key']) or {}).get(cid)
+    set_flow(cid, None if cur else 'open')       # щелчок — открыть / закрыть грань
+
+
+def on3_wheel(s_, e_):
+    if Keyboard.Modifiers & ModifierKeys.Control == ModifierKeys.Control:
+        return                                   # Ctrl+колесо — масштаб окна
+    V3['zoom'] = max(0.4, min(4.0, V3['zoom'] * (1.1 if e_.Delta > 0 else 1 / 1.1)))
+    e_.Handled = True
+    draw3d()
+
+
+cv3.MouseLeftButtonDown += on3_down
+cv3.MouseMove += on3_move
+cv3.MouseLeftButtonUp += on3_up
+cv3.MouseWheel += on3_wheel
+cv3.SizeChanged += lambda s_, e_: draw3d()
 
 
 def pick_item(it):
@@ -484,10 +862,20 @@ def pick_item(it):
     refresh()
 
 
-def on_sel(s, e):
-    c = lb.SelectedItem
-    if c is not None:
-        pick_item(c.Tag)
+def select_item(it):
+    """Подсветка строки — сразу, превью — следом (не держит мышь), повторный щелчок по той же строке — ничего."""
+    rows_bd.Focus()
+    if W.get('cur') is it:
+        return
+    W['cur'] = it
+    repaint_rows()
+    W['pending'] = it
+
+    def later():
+        if W.get('pending') is it:
+            W['pending'] = None
+            pick_item(it)
+    dlg.Dispatcher.BeginInvoke(DispatcherPriority.Background, System.Action(later))
 
 
 def on_face(s, e):
@@ -506,7 +894,6 @@ def on_views(s, e):
     refresh()
 
 
-lb.SelectionChanged += on_sel
 cb_face.SelectionChanged += on_face
 cb_rot.SelectionChanged += on_face
 for c in list(VIEW_CB.values()) + [cb_axo]:
@@ -533,15 +920,8 @@ def clean(name):
     return name.strip()
 
 
-@guarded
-def do_create(s, e):
-    chosen = [it for it, cb in W['rows'] if cb.IsChecked]
-    if not chosen:
-        status(u'Не отмечено ни одного изделия (раздел 1).', ok=False)
-        return
-    CFG['target'] = 'one' if r_one.IsChecked else 'each'
-    CFG['prefix'] = tb_pre.Text or u''
-    CFG['one_name'] = tb_one.Text or u'Эскизы_сводная'
+def plan_jobs(chosen):
+    """[(имя легенды, масштаб, изделия)] по настройкам раздела 4 — общее для «Создать» и «Открыть легенду»."""
     jobs = []
     if CFG['target'] == 'one':
         S = scale_for([it['part'] for it in chosen])
@@ -555,6 +935,89 @@ def do_create(s, e):
             if fams[it['fam']] > 1 or len([x for x in ITEMS if x['fam'] == it['fam']]) > 1:
                 nm += u'_' + it['tname']
             jobs.append((clean(nm), scale_for([it['part']]), [it]))
+    return jobs
+
+
+def inst_of(it):
+    """Экземпляр изделия: выделенный (КСД и др.) или любой этого типоразмера (пленумы)."""
+    if it.get('ids'):
+        return doc.GetElement(DB.ElementId(it['ids'][0]))
+    for fi in DB.FilteredElementCollector(doc).OfClass(DB.FamilyInstance):
+        if fi.Symbol is not None and fi.Symbol.Id == it['sym'].Id:
+            return fi
+    return None
+
+
+LEG_NAMES = set()
+
+
+def read_legends():
+    LEG_NAMES.clear()
+    for v in DB.FilteredElementCollector(doc).OfClass(DB.View):
+        if v.ViewType == DB.ViewType.Legend and not v.IsTemplate:
+            LEG_NAMES.add(v.Name)
+
+
+def has_sketch(it):
+    try:
+        return any(nm in LEG_NAMES for nm, S, its in plan_jobs([it]))
+    except Exception:
+        return False
+
+
+def update_marks():
+    CFG['target'] = 'each'
+    CFG['prefix'] = tb_pre.Text or u''
+    read_legends()
+    for r_, it, cb in ROWS:
+        MARK[id(it)].Text = u'✓ эскиз' if has_sketch(it) else u''
+
+
+@guarded
+def do_create(s, e):
+    chosen = [it for it, cb in W['rows'] if cb.IsChecked]
+    if not chosen:
+        status(u'Не отмечено ни одного изделия (раздел 1).', ok=False)
+        return
+    CFG['target'] = 'each'
+    CFG['prefix'] = tb_pre.Text or u''
+    errs, made, names = [], [], []
+    with revit.Transaction(u'ХУЙ: эскиз'):
+        st = E.styles(doc)
+        for nm, S, its in plan_jobs(chosen):
+            try:
+                lg = E.legend_for(doc, nm, S)
+                LG.build(doc, lg, [(it, opt_of(it)) for it in its], S, st, errs)
+                made.append(lg)
+                names.append(nm)
+            except Exception as ex:
+                errs.append(u'%s: %s' % (nm, ex))
+        # таблица врезок пленумов (живая спецификация по общим параметрам db_Вi_*) — если среди отмеченных есть пленум
+        if any(it['sym'].LookupParameter(u'db_В1_Размер') is not None for it in chosen):
+            try:
+                LG.spigot_schedule(doc, errs)
+                names.append(LG.SPIG_NAME)
+            except Exception as ex:
+                errs.append(u'таблица врезок: %s' % ex)
+    W['made'] = made
+    save_cfg()
+    update_marks()
+    msg = u'Готово: %d легенд(ы) — %s. Отмена — Ctrl+Z.' % (len(made), u', '.join(names))
+    if errs:
+        msg += u' Замечаний: %d (первое: %s)' % (len(errs), errs[0])
+    status(msg, ok=not errs)
+
+
+@guarded
+def do_create_legend(s, e):
+    chosen = [it for it, cb in W['rows'] if cb.IsChecked]
+    if not chosen:
+        status(u'Не отмечено ни одного изделия (раздел 1).', ok=False)
+        return
+    CFG['target'] = 'one' if r_one.IsChecked else 'each'
+    CFG['prefix'] = tb_pre.Text or u''
+    CFG['one_name'] = tb_one.Text or u'Эскизы_сводная'
+    jobs = plan_jobs(chosen)
     lines = []
     for nm, S, its in jobs:
         ex = E.find_legend(doc, nm)
@@ -587,11 +1050,28 @@ _fp = StackPanel()
 _fp.Children.Add(_old)
 _fp.Children.Add(W['status'])
 _fb.Child = _fp
-b_open = btn(u'Открыть легенду', None, tip=u'Закрыть окно и открыть последнюю созданную легенду')
+b_open = btn(u'Открыть легенду', None, tip=u'Закрыть окно и открыть легенду-эскиз: созданную только что, иначе — существующую для выбранного изделия')
 
 
+@guarded
 def on_open(s, e):
-    W['open'] = True
+    """Созданная в этом окне легенда; если ещё ничего не создавали — существующая легенда выбранного изделия."""
+    tgt = W['made'][-1] if W.get('made') else None
+    if tgt is None:
+        CFG['target'] = 'one' if r_one.IsChecked else 'each'
+        CFG['prefix'] = tb_pre.Text or u''
+        CFG['one_name'] = tb_one.Text or u'Эскизы_сводная'
+        chosen = [it for it, cb in W['rows'] if cb.IsChecked]
+        if W.get('cur') is not None and CFG['target'] == 'each':
+            chosen = [W['cur']]
+        for nm, S, its in (plan_jobs(chosen) if chosen else []):
+            tgt = E.find_legend(doc, nm)
+            if tgt is not None:
+                break
+    if tgt is None:
+        status(u'Легенды для этого изделия ещё нет — сначала «Создать».', ok=False)
+        return
+    W['open_view'] = tgt
     dlg.Close()
 
 
@@ -641,10 +1121,16 @@ dlg.PreviewMouseWheel += on_zoom_wheel
 dlg.PreviewKeyDown += on_zoom_key
 dlg.Closing += on_closing
 first = [r for r in W['rows'] if r[1].IsChecked] or W['rows']
-lb.SelectedItem = first[0][1]
+if first:
+    pick_item(first[0][0])
+    repaint_rows()
+try:
+    update_marks()
+except Exception:
+    pass
 dlg.ShowDialog()
-if W.get('open') and W.get('made'):
+if W.get('open_view') is not None:
     try:
-        uidoc.ActiveView = W['made'][-1]
-    except Exception:
-        pass
+        uidoc.ActiveView = W['open_view']
+    except Exception as ex:
+        forms.alert(u'Не удалось открыть легенду «%s»: %s' % (W['open_view'].Name, ex), title=u'Эскиз')

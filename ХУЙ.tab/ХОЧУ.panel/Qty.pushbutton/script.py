@@ -777,6 +777,7 @@ def step3():
 
 # ================================================================== запуск
 step1()
+forms.adaptive(dlg, 'qty')
 dlg.ShowDialog()
 
 if dlg.response == 'apply':

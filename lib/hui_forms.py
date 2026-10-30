@@ -15,6 +15,8 @@ pyrevit.forms), но окна рисуются в общем стиле:
 — подключает стили (кнопки-пилюли, поля, флажки, группы-карточки, слайдер)
 и добавляет тёмную шапку.  Кнопка с IsDefault=True становится зелёной.
 Для окна вывода pyRevit:  forms.style_output(output)
+Адаптивность окна (тянется, Ctrl+колесо — масштаб, размер запоминается):
+    forms.adaptive(window, u'ключ')
 """
 import os
 import sys
@@ -142,6 +144,107 @@ def style_output(output):
     return output
 
 
+# ------------------------------------------------------------------ адаптивное окно (стандарт «Объёмов», db 22.10.2026)
+def adaptive(win, key, size=True, root=None, min_w=None, min_h=None):
+    """Окно тянется, Ctrl+колесо — масштаб (60–160 %), Ctrl+0 — 100 %; размер и масштаб
+    запоминаются в hui_settings (ключ 'win_<key>'). Повторный вызов только меняет ключ/режим.
+    size=False — окно по содержимому (диалоги): запоминается только масштаб.
+    Ошибка внутри не ломает окно — оно просто откроется как раньше."""
+    try:
+        return _adaptive(win, key, size, root, min_w, min_h)
+    except Exception:
+        return win
+
+
+def _adaptive(win, key, size, root, min_w, min_h):
+    from System.Windows.Media import ScaleTransform
+    from System.Windows.Input import Keyboard, ModifierKeys
+    try:
+        import hui_settings as _hs
+    except Exception:
+        _hs = None
+    st = getattr(win, '_hui_ad', None)
+    first = st is None
+    if first:
+        st = {}
+        win._hui_ad = st
+    st['key'] = 'win_' + key
+    st['size'] = bool(size)
+    st['root'] = root or st.get('root')
+    cfg = {}
+    if _hs is not None:
+        try:
+            cfg = dict(_hs.get(st['key']) or {})
+        except Exception:
+            cfg = {}
+    if size:
+        try:
+            win.ResizeMode = ResizeMode.CanResize
+            if min_w:
+                win.MinWidth = min_w
+            if min_h:
+                win.MinHeight = min_h
+            if cfg.get('w') and cfg.get('h'):
+                win.SizeToContent = SizeToContent.Manual
+                win.Width = max(float(cfg['w']), win.MinWidth or 0)
+                win.Height = max(float(cfg['h']), win.MinHeight or 0)
+        except Exception:
+            pass
+
+    def target():
+        r = st.get('root')
+        return r if r is not None else win.Content
+
+    def set_zoom(z):
+        z = round(max(0.6, min(1.6, z)), 2)
+        st['zoom'] = z
+        t = target()
+        if t is not None:
+            try:
+                t.LayoutTransform = ScaleTransform(z, z)
+            except Exception:
+                pass
+    st['set_zoom'] = set_zoom
+
+    def on_loaded(s, e):
+        if st.get('zoom', 1.0) != 1.0:
+            set_zoom(st['zoom'])
+
+    def on_wheel(s, e):
+        if Keyboard.Modifiers & ModifierKeys.Control == ModifierKeys.Control:
+            st['set_zoom'](st.get('zoom', 1.0) + (0.05 if e.Delta > 0 else -0.05))
+            e.Handled = True
+
+    def on_key(s, e):
+        if Keyboard.Modifiers & ModifierKeys.Control == ModifierKeys.Control and str(e.Key) in ('D0', 'NumPad0'):
+            st['set_zoom'](1.0)
+            e.Handled = True
+
+    def on_closing(s, e):
+        if _hs is None:
+            return
+        try:
+            d = {'zoom': st.get('zoom', 1.0)}
+            if st['size'] and win.SizeToContent == SizeToContent.Manual:
+                d['w'], d['h'] = win.ActualWidth, win.ActualHeight
+            elif st['size']:
+                d['w'], d['h'] = win.ActualWidth, win.ActualHeight
+            old = dict(_hs.get(st['key']) or {})
+            if old != d:
+                _hs.set(st['key'], d)
+        except Exception:
+            pass
+    st['zoom'] = float(cfg.get('zoom', st.get('zoom', 1.0)) or 1.0)
+    if first:
+        win.Loaded += on_loaded
+        win.PreviewMouseWheel += on_wheel
+        win.PreviewKeyDown += on_key
+        win.Closing += on_closing
+    elif win.IsLoaded:
+        set_zoom(st['zoom'])
+    return win
+
+
 # ------------------------------------------------------------------ базовое окно-диалог
 class _Dialog(_pf.WPFWindow):
     """Пустое окно в стиле ХУЙ: шапка + тело + подвал с кнопками."""
@@ -264,6 +367,7 @@ def alert(msg, title=None, sub_msg=None, expanded=None, footer='',
             dlg.add_button(u'Да', True, primary=True)
         elif ok:
             dlg.add_button(u'ОК', True, primary=True, cancel=just_ok)
+    adaptive(dlg, 'dlg', size=False)
     dlg.ShowDialog()
     res = dlg.response
     if options:
@@ -311,6 +415,7 @@ def ask_for_string(default=None, prompt=None, title=None, **kwargs):
         tb.Focus()
         tb.SelectAll()
     dlg.Loaded += loaded
+    adaptive(dlg, 'dlg', size=False)
     dlg.ShowDialog()
     if dlg.response == '__ok__':
         return tb.Text
@@ -373,6 +478,7 @@ class CommandSwitchWindow(object):
                     dlg.response = opts[n - 1]
                     dlg.Close()
         dlg.KeyDown += keys
+        adaptive(dlg, 'dlg', size=False)
         dlg.ShowDialog()
         res = dlg.response
         if sw:
@@ -482,6 +588,7 @@ def pick_spot_side(title=u'Отметка на взрыв-схеме', value=u'�
         elif k == 'Escape':
             dlg.Close()
     dlg.KeyDown += keys
+    adaptive(dlg, 'dlg', size=False)
     dlg.ShowDialog()
     return dlg.response
 
@@ -497,6 +604,10 @@ class SelectFromList(_pf.SelectFromList):
         except Exception:
             pass
         _pf.SelectFromList._setup(self, **kwargs)
+        try:
+            adaptive(self, 'sfl')
+        except Exception:
+            pass
         try:
             self.hui_title.Text = self.Title
             if kwargs.get('multiselect'):
@@ -552,6 +663,7 @@ def reorder_list(items, title=u'Порядок', prompt=None):
     dlg.body.Children.Add(g)
     dlg.add_button(u'Отмена', None, cancel=True)
     dlg.add_button(u'Готово', '__ok__', primary=True)
+    adaptive(dlg, 'reorder')
     dlg.ShowDialog()
     if dlg.response == '__ok__':
         return [x for x in lb.Items]

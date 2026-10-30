@@ -460,6 +460,7 @@ def on_size(s, e):
 dlg.Loaded += on_loaded
 dlg.SizeChanged += on_size
 
+forms.adaptive(dlg, 'analis')
 dlg.ShowDialog()
 
 

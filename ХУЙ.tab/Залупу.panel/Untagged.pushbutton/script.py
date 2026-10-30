@@ -222,4 +222,5 @@ for text, h, prim, canc in ((u'◀ Назад', lambda s, e: step(-1), False, Fa
     b.IsCancel = canc
     b.Click += h
     dlg.footer.Children.Add(b)
+forms.adaptive(dlg, 'untagged')
 dlg.ShowDialog()

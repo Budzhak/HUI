@@ -1067,6 +1067,7 @@ def step3():
 
 # ================================================================== запуск
 step1()
+forms.adaptive(dlg, 'naim')
 dlg.ShowDialog()
 
 if dlg.response == 'apply':

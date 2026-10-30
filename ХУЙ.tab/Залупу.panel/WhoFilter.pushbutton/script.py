@@ -986,4 +986,5 @@ for text, handler, primary, cancel in ((u'Закрыть', on_close, False, True
     b.Click += handler
     dlg.footer.Children.Add(b)
 
+forms.adaptive(dlg, 'whofilter')
 dlg.ShowDialog()
