@@ -23,25 +23,17 @@
 После установки запустите Revit — на ленте появится вкладка **pyRevit**.
 
 **2. XYZ — прямо из pyRevit (основной способ).**
-1. В Revit на вкладке **pyRevit** нажмите **Расширения** (Extensions) — откроется «Менеджер расширений pyRevit».
-2. Внизу окна, в блоке **Информация Git**, в поле **URL Git** вставьте адрес:
-   ```
-   https://github.com/Budzhak/XYZ.git
-   ```
-   Остальные поля (путь, токен) оставьте пустыми.
-3. Нажмите **Добавить и установить**. pyRevit сам скачает плагин и перезагрузится — вкладка **XYZ** появится в конце ленты.
+1. В Revit на вкладке **pyRevit** нажмите **Расширения** (Extensions).
+2. В списке выделите **XYZ** и внизу окна нажмите **Установить расширение**.
+3. pyRevit сам скачает плагин и перезагрузится — вкладка **XYZ** появится в конце ленты.
 
 > [!NOTE]
-> В самом списке этого окна XYZ пока нет: в каталог расширений pyRevit плагин уже добавлен, но в списке он появится в следующих версиях pyRevit. До тех пор — через поле «URL Git», как выше.
->
 > Если раньше ставили XYZ вручную, сначала закройте Revit и удалите старую папку `%APPDATA%\pyRevit\Extensions\XYZ.extension`.
 
 **Запасные способы:**
-- **Одной командой.** Откройте «Командную строку» Windows, вставьте и нажмите Enter, затем в Revit — pyRevit → **Reload**:
-  ```
-  pyrevit extend ui XYZ https://github.com/Budzhak/XYZ.git
-  ```
-- **Вручную.** Вверху этой страницы: **Code → Download ZIP**. Распакуйте архив в `%APPDATA%\pyRevit\Extensions\`, переименуйте папку `XYZ-main` в `XYZ.extension`, затем pyRevit → **Reload**.
+- **По ссылке в том же окне:** pyRevit → **Расширения** → внизу в поле **URL Git** вставьте `https://github.com/Budzhak/XYZ.git` → **Добавить и установить**.
+- **Командой:** в «Командной строке» Windows выполните `pyrevit extend ui XYZ https://github.com/Budzhak/XYZ.git`, затем pyRevit → **Reload**.
+- **Вручную:** вверху этой страницы **Code → Download ZIP**, распакуйте в `%APPDATA%\pyRevit\Extensions\`, переименуйте папку `XYZ-main` в `XYZ.extension`, затем pyRevit → **Reload**.
 
 **3. Место вкладки.** Вкладка «XYZ» появляется в конце ленты. Чтобы она стояла сразу после «Вставить», в файле `%APPDATA%\pyRevit\xyz_settings.json` поставьте `"tab_after_insert": true` и сделайте Reload.
 

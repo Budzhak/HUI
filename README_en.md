@@ -21,11 +21,20 @@ MEP tools for Revit: tags, schematics, plenum families, fabrication sketches, sc
 
 Start Revit — the **pyRevit** tab appears on the ribbon.
 
-**2. XYZ.** Either:
-- **pyRevit Extensions Manager.** pyRevit → **Extensions** → find **XYZ** in the list and install it. If it is not listed yet, paste `https://github.com/Budzhak/XYZ.git` into the **Git URL** field → **Install**.
-- **Manually.** At the top of this page: **Code → Download ZIP**. Unpack it into `%APPDATA%\pyRevit\Extensions\` and rename the folder `XYZ-main` to `XYZ.extension`.
+**2. XYZ — right from pyRevit (main way).**
+1. In Revit, on the **pyRevit** tab, click **Extensions**.
+2. Select **XYZ** in the list and click **Install Extension** at the bottom of the window.
+3. pyRevit downloads the extension and reloads itself — the **XYZ** tab appears at the end of the ribbon.
 
-**3. Start.** pyRevit → **Reload**. The **XYZ** tab appears at the end of the ribbon. To place it right after **Insert**, set `"tab_after_insert": true` in `%APPDATA%\pyRevit\xyz_settings.json` and Reload.
+> [!NOTE]
+> If you installed XYZ manually before, close Revit and delete the old folder `%APPDATA%\pyRevit\Extensions\XYZ.extension` first.
+
+**Other ways:**
+- **By link in the same window:** pyRevit → **Extensions** → paste `https://github.com/Budzhak/XYZ.git` into the **Git URL** field at the bottom → **Add and install**.
+- **Command line:** run `pyrevit extend ui XYZ https://github.com/Budzhak/XYZ.git` in the Windows Command Prompt, then pyRevit → **Reload**.
+- **Manually:** at the top of this page **Code → Download ZIP**, unpack it into `%APPDATA%\pyRevit\Extensions\`, rename the folder `XYZ-main` to `XYZ.extension`, then pyRevit → **Reload**.
+
+**3. Tab position.** The **XYZ** tab appears at the end of the ribbon. To place it right after **Insert**, set `"tab_after_insert": true` in `%APPDATA%\pyRevit\xyz_settings.json` and Reload.
 
 **4. Vector PDF (optional).** PDF optimisation runs in a separate Python 3 ([python.org](https://www.python.org/downloads/windows/)) with:
 ```
@@ -33,7 +42,7 @@ py -m pip install --user pikepdf shapely numpy
 ```
 Without them, sheets are exported by Revit as is, without optimisation.
 
-**Update:** pyRevit → **Extensions** → XYZ → update (or download the ZIP again), then Reload.
+**Update:** pyRevit → **Update** — pyRevit downloads new versions of all extensions installed from Git (including XYZ) and reloads itself. Or with one command: `pyrevit extensions update XYZ`. If you installed manually, download the ZIP again and replace the folder, then Reload.
 
 > [!WARNING]
 > The tools were written for specific projects and templates (ADSK shared parameters and our own `db_*` parameters). Before bulk changes — do a trial run and save the model.
