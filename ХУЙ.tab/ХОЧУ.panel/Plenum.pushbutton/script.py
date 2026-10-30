@@ -61,7 +61,8 @@ doc = revit.doc
 uidoc = revit.uidoc
 app = doc.Application
 MM = 1.0 / 304.8
-FOP = u'D:\\Yandex.Disk\\REVIT\\ФОП\\ФОП2021(КС).txt'
+# 30.10.2026 db: свой ФОП плагина (те же GUID, что ФОП2021(КС), только нужные параметры) — лежит в расширении
+FOP = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), u'ФОП', u'db_ФОП.txt')
 OUT_DIR = os.path.join(os.environ.get('TEMP', ''), u'db_Пленум')
 
 FACES = [u'Спереди', u'Сзади', u'Слева', u'Справа', u'Сверху', u'Снизу']
@@ -1198,8 +1199,7 @@ def pick_family(base, code):
 
 def load_defs(names):
     orig = app.SharedParametersFilename
-    # ФОП db, если он есть на этом ПК; иначе — файл общих параметров, заданный в Revit (30.10.2026, для GitHub)
-    fop = FOP if os.path.isfile(FOP) else orig
+    fop = FOP if os.path.isfile(FOP) else orig   # db_ФОП из расширения; нет — ФОП, заданный в Revit
     if not fop or not os.path.isfile(fop):
         raise Exception(u'Нет файла общих параметров (ФОП). Задайте его в Revit: Управление → Общие параметры.')
     app.SharedParametersFilename = fop

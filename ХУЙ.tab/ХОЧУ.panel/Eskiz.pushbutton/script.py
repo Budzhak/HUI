@@ -46,6 +46,9 @@ except Exception:
     CFG = {}
 FACES_CFG = dict(CFG.get('faces') or {})
 FLOW_CFG = dict(CFG.get('flow') or {})          # {ключ изделия: {отверстие: 'in' | 'out' | 'none'}} — выбор db
+if not CFG.get('scale_v2'):                      # 30.10 db: 1:1 — размеров в превью не видно; по умолчанию «авто»
+    CFG['scale'] = 0
+    CFG['scale_v2'] = True
 
 
 def save_cfg():
@@ -102,11 +105,21 @@ def is_sel(it):
     return it['sym'].Id.IntegerValue in SEL_SYM
 
 
+def cam_vecs():
+    """Ракурс 3D-вида окна (раздел 2) в координатах изделия: (вправо, вверх, к зрителю) — им же строится аксонометрия."""
+    v3 = globals().get('V3') or {'yaw': float(CFG.get('yaw', -35.0)), 'pitch': float(CFG.get('pitch', 25.0))}
+    a, b = math.radians(v3['yaw']), math.radians(v3['pitch'])
+    return ((math.cos(a), -math.sin(a), 0.0),
+            (math.sin(b) * math.sin(a), math.sin(b) * math.cos(a), math.cos(b)),
+            (-math.cos(b) * math.sin(a), -math.cos(b) * math.cos(a), math.sin(b)))
+
+
 def opt_of(it):
     E.apply_flow(it['part'], FLOW_CFG.get(it['key']))
     f = FACES_CFG.get(it['key'])
     o = {'views': list(CFG.get('views', E.DEFAULT_OPT['views'])), 'axo': CFG.get('axo', True),
-         'az': float(CFG.get('az', 35.0)), 'el': float(CFG.get('el', 30.0)), 'axo_pos': CFG.get('axo_pos', 'middle')}
+         'az': float(CFG.get('az', 35.0)), 'el': float(CFG.get('el', 30.0)), 'axo_pos': CFG.get('axo_pos', 'middle'),
+         'axo_mode': CFG.get('axo_mode', 'free'), 'axo_cam': cam_vecs()}
     o['face'] = f[0] if f else E.default_face(it['part'])
     o['rot'] = int(f[1]) if f else 0
     return o
@@ -447,12 +460,19 @@ cb_axo.Content = u'Аксонометрия'
 cb_axo.IsChecked = CFG.get('axo', True)
 cb_axo.Margin = Thickness(0, 6, 0, 2)
 s3.Children.Add(cb_axo)
+p3m = hpanel()
+p3m.Children.Add(txt(u'ракурс', margin=Thickness(18, 3, 6, 0)))
+AXO_MODES = [u'как 3D-вид в разделе 2', u'ГОСТ: фронтальная изометрия']
+cb_mode = combo(AXO_MODES, AXO_MODES[1] if CFG.get('axo_mode') == 'gost' else AXO_MODES[0], 230)
+p3m.Children.Add(cb_mode)
+s3.Children.Add(p3m)
 p3 = hpanel()
 p3.Children.Add(txt(u'азимут °', margin=Thickness(18, 3, 6, 0)))
 
 
 def set_cfg(k, v):
     CFG[k] = v
+    save_cfg()                      # 30.10 db: настройки слетали — сохраняем сразу
     refresh()
 
 
@@ -462,6 +482,44 @@ p3.Children.Add(txt(u'наклон °', margin=Thickness(14, 3, 6, 0)))
 p3.Children.Add(num_field(float(CFG.get('el', 30)), -80, 80, 5, lambda v: set_cfg('el', v),
                           u'Взгляд сверху (+) или снизу (−). ↑/↓ — по 5°'))
 s3.Children.Add(p3)
+p3.Visibility = Visibility.Collapsed     # 30.10 db: подбор цифрами неудобен — ракурс задаётся 3D-видом и видовым кубом
+
+
+def _cube_dir(key):
+    it = W.get('cur')
+    if it is None:
+        return None
+    f = FACES_CFG.get(it['key'])
+    R, U, N = E.main_basis(f[0] if f else E.default_face(it['part']), int(f[1]) if f else 0)
+    if it['part'].get('rot180'):
+        fl = lambda v: (-v[0], -v[1], v[2])
+        R, U, N = fl(R), fl(U), fl(N)
+    m = {u'Спереди': N, u'Сзади': E.vmul(N, -1), u'Слева': E.vmul(R, -1), u'Справа': R, u'Сверху': U,
+         u'Снизу': E.vmul(U, -1)}
+    if key in m:
+        return m[key]
+    sx = {u'Изо ↗': 1, u'Изо ↖': -1, u'Изо ↘': 1, u'Изо ↙': -1}[key]
+    sy = -1 if key in (u'Изо ↘', u'Изо ↙') else 1
+    return E.vadd(N, E.vmul(R, sx), E.vmul(U, sy))
+
+
+cube = WrapPanel()
+cube.Margin = Thickness(18, 4, 0, 2)
+for k_ in (u'Спереди', u'Сзади', u'Слева', u'Справа', u'Сверху', u'Снизу', u'Изо ↗', u'Изо ↖', u'Изо ↘', u'Изо ↙'):
+    def _mk(k__):
+        def h(s_, e_):
+            d_ = _cube_dir(k__)
+            if d_ is not None:
+                set_cam(d_)
+        return h
+    b_ = btn(k_, _mk(k_), u'Видовой куб: взгляд на изделие ' + k_.lower() + u' (относительно главного вида)')
+    b_.Margin = Thickness(0, 0, 4, 4)
+    cube.Children.Add(b_)
+s3.Children.Add(cube)
+s3.Children.Add(txt(u'Ракурс аксонометрии — как 3D-вид в разделе 2: тяните модель мышью или жмите видовой куб '
+                    u'(Изо — изометрия с угла). Размеры Revit на свободном ракурсе — длина на листе (рёбра под углом '
+                    u'сокращены). ГОСТ: все три оси без сокращения — размеры верные.', muted=True, size=11,
+                    margin=Thickness(18, 2, 0, 0)))
 p3b = hpanel()
 p3b.Children.Add(txt(u'место', margin=Thickness(18, 3, 6, 0)))
 AXO_POS = [u'посередине группы видов', u'на уровне главного вида']
@@ -481,16 +539,22 @@ root.Children.Add(b3)
 # 4. куда
 b4, s4 = section(u'4. Куда')
 r_each = RadioButton()
-r_each.Content = u'Легенда на каждое изделие: компоненты легенды, размеры Revit'
+r_each.Content = u'Легенда на каждое изделие'
 r_one = RadioButton()
 r_one.Content = u'Одна легенда со всеми отмеченными (сводная / своя)'
 r_each.IsChecked = True
 r_one.Visibility = Visibility.Collapsed
 s4.Children.Add(r_each)
+p4m = hpanel(Thickness(18, 2, 0, 4))
+p4m.Children.Add(txt(u'чем рисовать', margin=Thickness(0, 3, 6, 0)))
+LG_MODES = [u'линиями — как в превью (размеры Revit по линиям)', u'компонентами легенды Revit']
+cb_lgm = combo(LG_MODES, LG_MODES[1] if CFG.get('lg_mode') == 'comp' else LG_MODES[0], 300)
+p4m.Children.Add(cb_lgm)
+s4.Children.Add(p4m)
 p4 = hpanel(Thickness(18, 2, 0, 6))
 p4.Children.Add(txt(u'имя: префикс', margin=Thickness(0, 3, 6, 0)))
 tb_pre = TextBox()
-tb_pre.Text = CFG.get('prefix', u'Эскиз_')
+tb_pre.Text = (u'db_Эскиз_' if CFG.get('prefix', u'Эскиз_') in (u'Эскиз_', u'') else CFG.get('prefix'))   # 30.10: всё своё — с db_
 tb_pre.MinWidth = 0
 tb_pre.Width = 90
 p4.Children.Add(tb_pre)
@@ -506,9 +570,9 @@ tb_one.Width = 220
 p4b.Children.Add(tb_one)
 p4b.Visibility = Visibility.Collapsed
 s4.Children.Add(p4b)
-s4.Children.Add(txt(u'Легенда «префикс + семейство»: главный вид и виды по разделу 3 — компоненты легенды с размерами '
-                    u'Revit, аксонометрия — 3D-компонент. В модели ничего не создаётся. Есть такая легенда — '
-                    u'пересобирается («✓ эскиз» в списке; «С эскизом» — отметить все такие).', muted=True, size=11))
+s4.Children.Add(txt(u'Линиями — легенда в точности как превью справа (виды, подписи, стрелки, аксонометрия под своим углом), '
+                    u'размеры — Revit, привязаны к линиям. Компонентами — виды из семейства (компоненты легенды), '
+                    u'аксонометрия — линиями. Есть такая легенда — пересобирается («✓ эскиз»; «С эскизом» — отметить все).', muted=True, size=11))
 root.Children.Add(b4)
 
 
@@ -595,11 +659,21 @@ def draw_preview():
     W['sc_note'].Text = u'превью: 1:%s, %s' % (E.fmt(S), it['fam'])
 
 
+def _log_err(what):
+    try:
+        import traceback, io as _io, os
+        with _io.open(os.path.join(os.environ.get('TEMP', ''), u'zb_eskiz_err.txt'), 'a', encoding='utf-8') as f_:
+            f_.write(u'--- %s\n%s\n' % (what, traceback.format_exc()))
+    except Exception:
+        pass
+
+
 def refresh(*a):
     try:
         draw_preview()
     except Exception as ex:
-        W['sc_note'].Text = u'превью не построено: %s' % ex
+        _log_err(u'превью')
+        W['sc_note'].Text = u'превью не построено: %s (подробности — %%TEMP%%\\zb_eskiz_err.txt)' % ex
     try:
         draw3d()
     except Exception as ex:
@@ -607,7 +681,24 @@ def refresh(*a):
 
 
 AUTO_RU = {'in': u'вход', 'out': u'выход', None: u'не определено'}
-V3 = {'yaw': -35.0, 'pitch': 25.0, 'zoom': 1.0, 'drag': None}
+V3 = {'yaw': float(CFG.get('yaw', -35.0)), 'pitch': float(CFG.get('pitch', 25.0)), 'zoom': 1.0, 'drag': None}
+
+
+def set_cam(d):
+    """Видовой куб: взгляд из направления d (к зрителю, координаты изделия)."""
+    d = E.unit(d)
+    V3['pitch'] = max(-89.0, min(89.0, math.degrees(math.asin(max(-1.0, min(1.0, d[2]))))))
+    if abs(d[0]) + abs(d[1]) > 1e-6:
+        V3['yaw'] = math.degrees(math.atan2(-d[0], -d[1]))
+    cam_changed()
+
+
+def cam_changed():
+    CFG['yaw'], CFG['pitch'] = V3['yaw'], V3['pitch']
+    save_cfg()
+    draw3d()
+    if CFG.get('axo_mode', 'free') == 'free':
+        refresh()
 RGB_OPEN, RGB_BOX, RGB_HL = (70, 110, 150), (200, 214, 203), (255, 204, 128)
 
 
@@ -820,6 +911,7 @@ def on3_up(s_, e_):
     cv3.ReleaseMouseCapture()
     p0, p1 = V3.get('start'), e_.GetPosition(cv3)
     if p0 is None or abs(p1.X - p0.X) + abs(p1.Y - p0.Y) > 4:
+        cam_changed()                            # 30.10 db: повернули 3D — аксонометрия под тем же углом
         return                                   # тянули — поворот, не щелчок
     src = V3.get('src')
     i = getattr(src, 'Tag', None) if isinstance(src, Polygon) else None
@@ -881,7 +973,8 @@ def select_item(it):
 def on_face(s, e):
     if W.get('busy') or W['cur'] is None:
         return
-    FACES_CFG[W['cur']['key']] = [cb_face.SelectedItem, int(unicode(cb_rot.SelectedItem).replace(u'°', u''))]
+    FACES_CFG[W['cur']['key']] = [unicode(cb_face.SelectedItem), int(unicode(cb_rot.SelectedItem).replace(u'°', u''))]
+    save_cfg()
     refresh()
 
 
@@ -889,8 +982,11 @@ def on_views(s, e):
     CFG['views'] = [k for k, c in VIEW_CB.items() if c.IsChecked]
     CFG['axo'] = bool(cb_axo.IsChecked)
     CFG['axo_pos'] = 'top' if cb_pos.SelectedItem == AXO_POS[1] else 'middle'
+    CFG['axo_mode'] = 'gost' if cb_mode.SelectedItem == AXO_MODES[1] else 'free'
     v = cb_sc.SelectedItem
     CFG['scale'] = 0 if v == u'авто' else float(v)
+    CFG['lg_mode'] = 'comp' if cb_lgm.SelectedItem == LG_MODES[1] else 'lines'
+    save_cfg()
     refresh()
 
 
@@ -899,6 +995,8 @@ cb_rot.SelectionChanged += on_face
 for c in list(VIEW_CB.values()) + [cb_axo]:
     c.Click += on_views
 cb_pos.SelectionChanged += on_views
+cb_mode.SelectionChanged += on_views
+cb_lgm.SelectionChanged += on_views
 cb_sc.SelectionChanged += on_views
 cv.SizeChanged += refresh
 
@@ -931,7 +1029,10 @@ def plan_jobs(chosen):
         for it in chosen:
             fams[it['fam']] = fams.get(it['fam'], 0) + 1
         for it in chosen:
-            nm = CFG['prefix'] + it['fam']
+            fam_ = it['fam']
+            if CFG['prefix'].startswith(u'db_') and fam_.startswith(u'db_'):
+                fam_ = fam_[3:]                  # «db_Эскиз_Пленум_…», а не «db_Эскиз_db_Пленум_…»
+            nm = CFG['prefix'] + fam_
             if fams[it['fam']] > 1 or len([x for x in ITEMS if x['fam'] == it['fam']]) > 1:
                 nm += u'_' + it['tname']
             jobs.append((clean(nm), scale_for([it['part']]), [it]))
@@ -982,12 +1083,16 @@ def do_create(s, e):
     CFG['target'] = 'each'
     CFG['prefix'] = tb_pre.Text or u''
     errs, made, names = [], [], []
+    CFG['lg_mode'] = 'comp' if cb_lgm.SelectedItem == LG_MODES[1] else 'lines'
     with revit.Transaction(u'ХУЙ: эскиз'):
         st = E.styles(doc)
         for nm, S, its in plan_jobs(chosen):
             try:
                 lg = E.legend_for(doc, nm, S)
-                LG.build(doc, lg, [(it, opt_of(it)) for it in its], S, st, errs)
+                if CFG['lg_mode'] == 'lines':       # 30.10 db: линиями информативнее — как превью
+                    errs += E.emit(doc, lg, E.build_many([(it['part'], opt_of(it)) for it in its], S), st)
+                else:
+                    LG.build(doc, lg, [(it, opt_of(it)) for it in its], S, st, errs)
                 made.append(lg)
                 names.append(nm)
             except Exception as ex:
@@ -1113,6 +1218,13 @@ def on_zoom_key(s_, e_):
 
 def on_closing(s_, e_):
     CFG['w'], CFG['h'] = dlg.ActualWidth, dlg.ActualHeight
+    try:                                         # 30.10 db: масштаб и режимы — с контролов, что бы ни было раньше
+        v_ = cb_sc.SelectedItem
+        CFG['scale'] = 0 if v_ == u'авто' else float(v_)
+        CFG['axo_mode'] = 'gost' if cb_mode.SelectedItem == AXO_MODES[1] else 'free'
+        CFG['lg_mode'] = 'comp' if cb_lgm.SelectedItem == LG_MODES[1] else 'lines'
+    except Exception:
+        pass
     CFG['left_w'] = c0.ActualWidth
     save_cfg()
 
@@ -1128,6 +1240,27 @@ try:
     update_marks()
 except Exception:
     pass
+# окно — поверх Revit и на его мониторе (30.10: окно открывалось где-то вне глаз, Revit «серел» и ждал)
+try:
+    import System.Diagnostics
+    from System.Windows.Interop import WindowInteropHelper
+    from System.Windows import WindowStartupLocation as _WSL
+    _hw = System.Diagnostics.Process.GetCurrentProcess().MainWindowHandle
+    WindowInteropHelper(dlg).Owner = _hw
+    dlg.WindowStartupLocation = _WSL.CenterOwner
+    dlg.MaxHeight = System.Windows.SystemParameters.WorkArea.Height
+except Exception:
+    pass
+
+
+def _bring_front(s_, e_):
+    try:
+        dlg.Activate()
+        dlg.Topmost = True
+        dlg.Topmost = False
+    except Exception:
+        pass
+dlg.ContentRendered += _bring_front
 dlg.ShowDialog()
 if W.get('open_view') is not None:
     try:

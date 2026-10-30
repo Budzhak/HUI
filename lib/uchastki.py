@@ -823,7 +823,10 @@ P_TSYS = u'db_Трубы_Система'        # система (жидк. + г
 P_PSIZE = u'db_Трубы_Размер'        # «Ø25.4» — графа «Размер трубы» / «Размер»
 P_ANG = u'db_Трубы_Угол'            # «90°» — у отводов под пайку
 BEND_MAX = 23.0                     # отводы до 23 мм — гнутые участки трубы, от 23 мм — под пайку
-FOP = u'D:\\Yandex.Disk\\REVIT\\ФОП\\ФОП2021(КС).txt'
+# 30.10.2026 db: свой ФОП плагина (те же GUID, что ФОП2021(КС), только нужные параметры) — лежит в расширении,
+# поэтому работает на любом ПК и из GitHub
+import os
+FOP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), u'ФОП', u'db_ФОП.txt')
 C_PIPE = int(BuiltInCategory.OST_PipeCurves)
 
 

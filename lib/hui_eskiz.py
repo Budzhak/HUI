@@ -38,7 +38,7 @@ SCALES = [1, 2, 2.5, 4, 5, 10, 15, 20, 25, 50]
 VIEWS = [('main', u'Главный вид', 1, 1), ('left', u'Вид слева', 2, 1), ('top', u'Вид сверху', 1, 2),
          ('right', u'Вид справа', 0, 1), ('bottom', u'Вид снизу', 1, 0), ('rear', u'Вид сзади', 3, 1)]
 VIEW_TITLE = dict((k, t) for k, t, c, r in VIEWS)
-DEFAULT_OPT = {'face': None, 'rot': 0, 'views': ['main', 'left', 'top'], 'axo': True, 'az': 35.0, 'el': 30.0,
+DEFAULT_OPT = {'face': None, 'rot': 0, 'views': ['main', 'left', 'top'], 'axo': True, 'az': 35.0, 'el': 30.0, 'axo_mode': 'free',
                'axo_pos': 'middle', 'scale': 0}
 TXT_W = 0.62           # ширина знака / высота текста — для раскладки и превью
 
@@ -368,7 +368,7 @@ def render_adim(p, S):
         ang += 180
     up = (-math.sin(math.radians(ang)), math.cos(math.radians(ang)))
     mid = vadd(a, vmul(d, (lo + hi) / 2))
-    out.append(('text', {'pos': vadd(mid, vmul(up, 3.6 * S)), 's': fmt(hi - lo), 'rot': ang, 'h': 2.5, 'al': 'c',
+    out.append(('text', {'pos': vadd(mid, vmul(up, 3.6 * S)), 's': fmt(round(p['val'])) if p.get('val') is not None else fmt(hi - lo), 'rot': ang, 'h': 2.5, 'al': 'c',
                          'dim': True}))
     return out
 
@@ -834,8 +834,9 @@ AXO_DIMS = True          # db 29.10: размеры на аксонометри�
 AXO_LABELS = False       # подписи «овал …», «Ø…» на аксонометрии — нет (текст не обновляется; размеры — на видах)
 
 
-def build_axo(part, basis, az, el, S):
+def build_axo(part, basis, az, el, S, mode='free', cam=None):
     R0, U0, N0 = basis
+    R0o, U0o, N0o = R0, U0, N0
     el = max(-85.0, min(85.0, el))
 
     # Фронтальная изометрия (ГОСТ 2.317): ось X — горизонтально, Z — вертикально, Y — под 45°, коэффициенты 1.
@@ -853,7 +854,7 @@ def build_axo(part, basis, az, el, S):
     # sn = −1 — смотрим с обратной стороны (ось X тоже разворачиваем, чтобы не было зеркального изображения)
     for sn_, sx_, sy_ in [(sn, a_, b_) for sn in (1, -1) for a_, b_ in ((sx0, sy0), (-sx0, sy0), (sx0, -sy0), (-sx0, -sy0))]:
         e3_ = eye(sx_, sy_, sn_)
-        sc = sum(((4 if c.get('full') else 2) if c['l'] <= 0.5 else 1) for c in part['cuts'] if dot(c['n3'], e3_) > 0.05)
+        sc = sum([((4 if c.get('full') else 2) if c['l'] <= 0.5 else 3) for c in part['cuts'] if dot(c['n3'], e3_) > 0.05])  # 30.10 db: патрубки видны важнее проёма сзади
         if best is None or sc > best[0]:
             best = (sc, sx_, sy_, sn_)
     SX, SY, SN = best[1], best[2], best[3]
@@ -868,6 +869,20 @@ def build_axo(part, basis, az, el, S):
         t = -dot(p, N0)                              # глубина от зрителя
         return (dot(p, R0) + SX * t * C45, dot(p, U0) + SY * t * C45)
 
+    if mode == 'free':
+        # 30.10 db: свой угол — прямоугольная проекция по азимуту (вокруг вертикали от главного вида, + справа)
+        # и наклону (+ сверху). Размеры Revit на ней — длина на листе (рёбра под углом сокращены).
+        a_, e_ = math.radians(az), math.radians(el)
+        e3 = unit(vadd(vmul(N0o, math.cos(e_) * math.cos(a_)), vmul(R0o, math.cos(e_) * math.sin(a_)), vmul(U0o, math.sin(e_))))
+        XS = unit(vsub(vmul(R0o, math.cos(a_)), vmul(N0o, math.sin(a_))))
+        YS = unit(vsub(vmul(U0o, math.cos(e_)), vmul(vadd(vmul(N0o, math.cos(a_)), vmul(R0o, math.sin(a_))), math.sin(e_))))
+        R0, U0, N0 = R0o, U0o, N0o
+        if cam:                                      # 30.10 db: ракурс = 3D-вид окна (раздел 2), видовой куб
+            XS, YS, e3 = unit(cam[0]), unit(cam[1]), unit(cam[2])
+
+        def pr(p):
+            return (dot(p, XS), dot(p, YS))
+
     solids = [_Box(vmul(hw, -1), hw)]
     for c in part['cuts']:
         if c['l'] <= 0.5:
@@ -878,7 +893,7 @@ def build_axo(part, basis, az, el, S):
         else:
             ext = vadd(vmul(c['u3'], c['w'] / 2.0), vmul(c['v3'], c['h'] / 2.0))
             pts = [vadd(c['o3'], ext), vsub(c['o3'], ext), vadd(c['t3'], ext), vsub(c['t3'], ext)]
-            solids.append(_Box(tuple(min(q[i] for q in pts) for i in range(3)), tuple(max(q[i] for q in pts) for i in range(3))))
+            solids.append(_Box(tuple([min([q[i] for q in pts]) for i in range(3)]), tuple([max([q[i] for q in pts]) for i in range(3)])))
     eps = 0.3
 
     def visible(P):
@@ -939,7 +954,7 @@ def build_axo(part, basis, az, el, S):
     for c in sorted(part['cuts'], key=lambda c_: -dot(c_['t3'], R0)):
         nseg = max(24, min(72, int(math.pi * max(c['w'], c['h']) / (3 * S)))) if c['shape'] in ('c', 'o') else 4
         tip = ring(c['t3'], c, nseg)
-        par = c['shape'] in ('c', 'o') and abs(dot(c['n3'], N0)) > 0.99 and not c.get('full')
+        par = mode != 'free' and c['shape'] in ('c', 'o') and abs(dot(c['n3'], N0)) > 0.99 and not c.get('full')
         if par:
             # торец ∥ плоскости главного вида — во фронтальной изометрии без искажения: настоящие дуги,
             # на них — размер Revit R / Ø (у первой справа, один раз на размер)
@@ -1010,6 +1025,7 @@ def build_axo(part, basis, az, el, S):
             return
         a, b = pr(vadd(A, vmul(dr, off))), pr(vadd(B, vmul(dr, off)))
         pen.adim((refs[0], 0), (refs[1], 1), pr(A), pr(B), a, b)
+        pen.p[-1]['val'] = vlen(vsub(B, A))           # истинная длина ребра (db 30.10: на свободном ракурсе)
         used.append(vmul(vadd(a, b), 0.5))
 
     def idim(A, B, dr, off, s):
@@ -1037,10 +1053,10 @@ def build_axo(part, basis, az, el, S):
             if pl < 0.35:
                 continue
             for off in [x * k for x in (50, 70, 90, 120, 150, 190, 240)]:
-                ok = all(outside(pr(vadd(vadd(A, vmul(vsub(B, A), f)), vmul(dr, off)))) for f in (0, 0.25, 0.5, 0.75, 1))
+                ok = all([outside(pr(vadd(vadd(A, vmul(vsub(B, A), f)), vmul(dr, off)))) for f in (0, 0.25, 0.5, 0.75, 1)])
                 if ok:
                     mid = pr(vadd(vmul(vadd(A, B), 0.5), vmul(dr, off)))
-                    near = sum(1 for q in used if vlen(vsub(q, mid)) < 60 * k)
+                    near = len([1 for q in used if vlen(vsub(q, mid)) < 60 * k])
                     sc = off * pl / pl + near * 1000 + (0 if dot(dr, e3) <= 0.05 else 30 * k) - (dot(pr(dr), (0, -1)) > 0.5) * 5 * k
                     if best is None or sc < best[0]:
                         best = (sc, A, B, dr, off, cd[3] if len(cd) > 3 else None)
@@ -1087,8 +1103,8 @@ def build_axo(part, basis, az, el, S):
             if True:
                 off = 35 * k
                 mid = pr(vadd(vmul(vadd(A, B), 0.5), vmul(dr, off)))
-                hit = sum(1 for c2, h2 in noz if c2 is not c and _in_hull(h2, mid))
-                near = sum(1 for q in used if vlen(vsub(q, mid)) < 50 * k)
+                hit = len([1 for c2, h2 in noz if c2 is not c and _in_hull(h2, mid)])
+                near = len([1 for q in used if vlen(vsub(q, mid)) < 50 * k])
                 sc = hit * 10 + near * 5 - unit(pr(dr))[1] - 0.5 * dot(unit(pr(dr)), unit(vsub(pr(c['o3']), (0, 0))))
                 if best is None or sc < best[0]:
                     best = (sc, A, B, dr, off, refs)
@@ -1247,7 +1263,7 @@ def build_sketch(part, opt, S):
                 prims.append({'t': 'text', 'pos': (cx[v['col']], top + 9 * S), 's': v['title'], 'rot': 0.0, 'h': 2.5, 'al': 'c'})
     gb = bbox(render(prims, S), S)
     if o['axo']:
-        ap = build_axo(part, (R, U, N), o['az'], o['el'], S)
+        ap = build_axo(part, (R, U, N), o['az'], o['el'], S, o.get('axo_mode', 'free'), o.get('axo_cam'))
         ab = bbox(render(ap, S), S)
         main_row = [v for v in views if v['row'] == 1]
         if o['axo_pos'] == 'top' and main_row:
@@ -1262,8 +1278,8 @@ def build_sketch(part, opt, S):
         prims.append({'t': 'text', 'pos': ((ab[0] + ab[2]) / 2.0 + dx, top_axo + 9 * S), 's': u'Аксонометрия',
                       'rot': 0.0, 'h': 2.5, 'al': 'c'})
     gb = bbox(render(prims, S), S)
-    head = part['family'] + (u' : ' + part['type'] if part['type'] else u'')
-    prims.append({'t': 'text', 'pos': (gb[0], gb[3] + 12 * S), 's': head, 'rot': 0.0, 'h': 3.5, 'al': 'l'})
+    head = u'Семейство: ' + part['family'] + (u'\nТип: ' + part['type'] if part['type'] else u'')   # db 30.10
+    prims.append({'t': 'text', 'pos': (gb[0], gb[3] + (19 if part['type'] else 12) * S), 's': head, 'rot': 0.0, 'h': 3.5, 'al': 'l'})
     prims.append({'t': 'text', 'pos': (gb[0], gb[1] - 10 * S), 's': tt_lines(part), 'rot': 0.0, 'h': 2.5, 'al': 'l'})
     gb = bbox(render(prims, S), S)
     shift(prims, -gb[0], -gb[3])
@@ -1655,6 +1671,19 @@ def styles(doc):
     dts = [d for d in FilteredElementCollector(doc).OfClass(DimensionType)
            if d.StyleType == DimensionStyleType.Linear]
     st['dim'] = ([d for d in dts if nm(d) == u'ADSK_Основной_2.5 мм'] or [d for d in dts if u'2.5' in nm(d) and u'кругл' not in nm(d).lower()] or dts)[0]
+    # 30.10 db: размеры эскиза — другим цветом, чтобы не сливались с гранями (зелёный, как в превью)
+    try:
+        DN = u'db_Эскиз_размер 2.5 зелёный'
+        own = [d for d in dts if nm(d) == DN]
+        if own:
+            st['dim'] = own[0]
+        elif doc.IsModifiable:
+            from Autodesk.Revit.DB import BuiltInParameter
+            dn = st['dim'].Duplicate(DN)
+            dn.get_Parameter(BuiltInParameter.LINE_COLOR).Set(46 + 125 * 256 + 50 * 65536)
+            st['dim'] = dn
+    except Exception:
+        pass
     tts = list(FilteredElementCollector(doc).OfClass(TextNoteType))
 
     def tt(name, h):
@@ -1824,7 +1853,12 @@ def emit(doc, view, prims, st):
                 if el is None:
                     raise Exception(u'нет линии для размера')
                 ra.Append(el.GeometryCurve.GetEndPointReference(end))
-            doc.Create.NewDimension(view, Line.CreateBound(P(p['a']), P(p['b'])), ra, st['dim'])
+            dm = doc.Create.NewDimension(view, Line.CreateBound(P(p['a']), P(p['b'])), ra, st['dim'])
+            # аксонометрия под свободным ракурсом: ребро на листе сокращено — размер показывает истинную длину
+            # (ГОСТ 2.317: на аксонометрии — действительные размеры); на ГОСТ-ракурсе совпадает, замены нет
+            v_ = p.get('val')
+            if v_ is not None and dm.Value is not None and abs(dm.Value * 304.8 - v_) > 0.5:
+                dm.ValueOverride = fmt(round(v_))
         except Exception as ex:
             errs.append(u'axo dim: %s' % ex)
     for p in prims:
@@ -1864,6 +1898,17 @@ def _radial(doc, view, ref, pos, kind, st):
                 best = (sc, t)
         if best is not None and best[0] > 0:
             dm.DimensionType = best[1]
+        # зелёный, как линейные размеры эскиза (db 30.10)
+        from Autodesk.Revit.DB import BuiltInParameter
+        cur = doc.GetElement(dm.GetTypeId())
+        gn = nm(cur) + u' db_Эскиз зелёный'
+        g = [t for t in FilteredElementCollector(doc).OfClass(DimensionType) if nm(t) == gn]
+        if g:
+            g = g[0]
+        else:
+            g = cur.Duplicate(gn)
+            g.get_Parameter(BuiltInParameter.LINE_COLOR).Set(46 + 125 * 256 + 50 * 65536)
+        dm.DimensionType = g
     except Exception:
         pass
     return dm

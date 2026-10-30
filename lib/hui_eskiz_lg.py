@@ -6,7 +6,7 @@
 Компонент легенды показывает ТИП с параметрами по умолчанию: длина экземпляра (КСД: 4_L) не видна →
 габарит по длине подписывается «L», длины экземпляров — строкой над эскизом (как в легенде db «Эскизы КСД»).
 
-Вид компонента → оси семейства (вправо, вверх, к зрителю) — замер 29.10 на КСД 50:
+Вид компонента → оси семейства (вправо, вверх, к зрителю) — замер 29.10 на КСД 50 (Береста):
 -7 «Спереди», -6 «Сзади», -10 «Слева», -9 «Справа», -8 «План этажа», -3 «3D»."""
 from __future__ import division
 import math
@@ -17,6 +17,7 @@ from Autodesk.Revit.DB import (XYZ, Options, GeometryInstance, Solid, PlanarFace
                                CopyPasteOptions, Transform, TextNote, TextNoteOptions, FilledRegion, CurveLoop,
                                ReferenceArray, RadialDimension)
 from System.Collections.Generic import List
+from Autodesk.Revit.DB import View, ViewType, ViewDuplicateOption, GraphicsStyleType
 
 FT = 304.8
 DEBUG = False
@@ -31,17 +32,55 @@ def rnd(v):
     return tuple(int(round(x)) for x in v)
 
 
+SEED_LEGEND = u'db_Эскиз_образец'     # служебная легенда: один компонент — образец для копирования (не удалять)
+
+
 def seed_component(doc):
+    """Образец компонента легенды: сначала из служебной легенды, иначе любой (и тогда копия уходит в служебную)."""
+    anyc = None
     for e in FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_LegendComponents).WhereElementIsNotElementType():
-        return e
-    return None
+        v = doc.GetElement(e.OwnerViewId)
+        if v is not None and v.Name == SEED_LEGEND:
+            return e
+        if anyc is None:
+            anyc = e
+    if anyc is None:
+        return None
+    try:                                  # закрепить образец в служебной легенде, чтобы чистка эскизов его не унесла
+        sv = None
+        for v in FilteredElementCollector(doc).OfClass(View):
+            if v.ViewType == ViewType.Legend and v.Name == SEED_LEGEND:
+                sv = v
+                break
+        if sv is None:
+            sv = doc.GetElement(doc.GetElement(anyc.OwnerViewId).Duplicate(ViewDuplicateOption.Duplicate))
+            sv.Name = SEED_LEGEND
+            ids = [x.Id for x in FilteredElementCollector(doc, sv.Id).WhereElementIsNotElementType()
+                   if x.Category is not None and x.Id != sv.Id]
+            if ids:
+                doc.Delete(List[ElementId](ids))
+        ElementTransformUtils.CopyElements(doc.GetElement(anyc.OwnerViewId), List[ElementId]([anyc.Id]), sv,
+                                           Transform.Identity, CopyPasteOptions())
+        doc.Regenerate()
+    except Exception:
+        pass
+    return anyc
 
 
 def place(doc, seed, lg, sym, cv):
     """Копия компонента-образца в легенду lg: типоразмер sym, вид cv."""
     ids = ElementTransformUtils.CopyElements(doc.GetElement(seed.OwnerViewId), List[ElementId]([seed.Id]), lg,
                                              Transform.Identity, CopyPasteOptions())
-    c = doc.GetElement(list(ids)[0])
+    c, extra = None, []
+    for i in ids:                       # вместе с образцом Revit копирует привязанные к нему размеры — они станут
+        e = doc.GetElement(i)           # некорректными («опорные элементы размеров») — удалить сразу (30.10, Береста)
+        if c is None and e is not None and e.Category is not None and \
+                e.Category.Id.IntegerValue == int(BuiltInCategory.OST_LegendComponents):
+            c = e
+        else:
+            extra.append(i)
+    if extra:
+        doc.Delete(List[ElementId](extra))
     c.get_Parameter(BuiltInParameter.LEGEND_COMPONENT).Set(sym.Id)
     c.get_Parameter(BuiltInParameter.LEGEND_COMPONENT_VIEW).Set(cv)
     return c
@@ -230,15 +269,18 @@ def build_one(doc, lg, seed, it, opt, S, st, errs, y_top):
         doc.Regenerate()
         ybot = bb(c)[1] - gap
     if o['axo']:
+        # 30.10 (db): 3D-компонент легенды Revit не поворачивается и показывал пленум «спиной» (без патрубков).
+        # Аксонометрия — как в превью: фронтальная изометрия ГОСТ 2.317 (E.build_axo) линиями детализации,
+        # сторона — где видно патрубки и открытые грани; размеры Revit — по концам этих линий.
         try:
-            c3 = place(doc, seed, lg, it['sym'], -3)
-            doc.Regenerate()
-            b = bb(c3)
-            ElementTransformUtils.MoveElement(doc, c3.Id, XYZ(xr - b[0], (bm[1] + bm[3]) / 2 - (b[1] + b[3]) / 2, 0))
-            doc.Regenerate()
-            ybot = min(ybot, bb(c3)[1] - gap)
+            ap = E.build_axo(part, (R0, U0, N0), o['az'], o['el'], S, o.get('axo_mode', 'free'), o.get('axo_cam'))
+            ab = E.bbox(E.render(ap, S), S)
+            ymid = (bm[1] + bm[3]) / 2 * FT
+            E.shift(ap, xr * FT - ab[0], ymid - (ab[1] + ab[3]) / 2.0)
+            errs.extend([u'аксонометрия: ' + x for x in E.emit(doc, lg, ap, st)])
+            ybot = min(ybot, (ymid - (ab[3] - ab[1]) / 2.0) / FT - gap)
         except Exception as ex:
-            errs.append(u'3D: %s' % ex)
+            errs.append(u'аксонометрия: %s' % ex)
     # размеры и заливка на ортогональных видах
     lens = lengths_note(doc, it)
     done_r = set()
@@ -252,7 +294,7 @@ def build_one(doc, lg, seed, it, opt, S, st, errs, y_top):
     # заголовок и ТТ
     try:
         o2 = TextNoteOptions(st['t3.5'])
-        TextNote.Create(doc, lg.Id, XYZ(0, head_y, 0), it['sym'].FamilyName + u' : ' + E.nm(it['sym']), o2)
+        TextNote.Create(doc, lg.Id, XYZ(0, head_y, 0), u'Семейство: ' + it['sym'].FamilyName + u'\nТип: ' + E.nm(it['sym']), o2)
         if lens:
             o25 = TextNoteOptions(st['t2.5'])
             TextNote.Create(doc, lg.Id, XYZ(0, head_y - 8 * k, 0),
@@ -270,7 +312,39 @@ def dims_l(doc, lg, c, faces, arcs, pts, dt, S, errs, done_r, lens, it, comp, Nk
     """Размеры Revit к граням компонента (как V.dims_view); габарит вдоль оси длины семейства (X) — «L»,
     если длина задаётся экземпляром."""
     before = set(e.Id.IntegerValue for e in FilteredElementCollector(doc, lg.Id).OfCategory(BuiltInCategory.OST_Dimensions))
-    made = V.dims_view(doc, lg, c, faces, arcs, pts, dt, S, errs, done_r=done_r)
+    # центры патрубков: ссылки на дуги компонента легенды Revit бракует при сохранении (30.10) — поэтому через центр
+    # каждой видимой окружности — короткая вспомогательная линия стиля «невидимые линии» (способ db), размер — к ней
+    arcs_c = []
+    try:
+        R_, U_, N_ = lg.RightDirection, lg.UpDirection, lg.ViewDirection
+        sty = None
+        try:
+            sty = doc.Settings.Categories.get_Item(BuiltInCategory.OST_InvisibleLines).GetGraphicsStyle(GraphicsStyleType.Projection)
+        except Exception:
+            sty = None
+        hl = 1.5 * S / 304.8                     # полудлина линии: 1,5 мм листа
+        seen = []
+        for a in arcs:
+            if abs(a['n'].DotProduct(N_)) < 0.999:
+                continue
+            q = a['c']
+            if any(q.DistanceTo(p0) < 0.5 / 304.8 for p0 in seen):
+                continue
+            seen.append(q)
+            eps = []
+            for d_, far in ((U_, U_), (R_, R_)):  # линия вдоль U — для размеров по R, вдоль R — для размеров по U
+                dc = doc.Create.NewDetailCurve(lg, Line.CreateBound(q - d_.Multiply(hl), q + d_.Multiply(hl)))
+                if sty is not None:
+                    try:
+                        dc.LineStyle = sty
+                    except Exception:
+                        pass
+                eps.append((dc.GeometryCurve.Reference, q + far.Multiply(1.0)))   # сдвиг «far» уводит ссылку из чужой оси
+            arcs_c.append({'ref': None, 'eps': eps, 'c': q, 'r': a['r'], 'n': a['n']})
+    except Exception as ex:
+        errs.append(u'вспомогательные линии: %s' % ex)
+        arcs_c = []
+    made = V.dims_view(doc, lg, c, faces, arcs_c, pts, dt, S, errs, radii=False, done_r=done_r)
     if DEBUG:
         from Autodesk.Revit.DB import Dimension as _D
         errs.append(u'dbg dims now in legend: %d' % len(list(FilteredElementCollector(doc, lg.Id).OfClass(_D))))
