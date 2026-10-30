@@ -516,8 +516,9 @@ for k_ in (u'Спереди', u'Сзади', u'Слева', u'Справа', u'�
     b_.Margin = Thickness(0, 0, 4, 4)
     cube.Children.Add(b_)
 s3.Children.Add(cube)
-s3.Children.Add(txt(u'Ракурс аксонометрии — как 3D-вид в разделе 2: тяните модель мышью или жмите видовой куб '
-                    u'(Изо — изометрия с угла). Размеры Revit на свободном ракурсе — длина на листе (рёбра под углом '
+cube.Visibility = Visibility.Collapsed       # 30.10 db: видовой куб — в углу 3D-вида раздела 2
+s3.Children.Add(txt(u'Ракурс аксонометрии — как 3D-вид в разделе 2: тяните модель мышью или щёлкните видовой куб '
+                    u'в его углу (грань, ребро, угол). Размеры Revit на свободном ракурсе — длина на листе (рёбра под углом '
                     u'сокращены). ГОСТ: все три оси без сокращения — размеры верные.', muted=True, size=11,
                     margin=Thickness(18, 2, 0, 0)))
 p3b = hpanel()
@@ -884,6 +885,68 @@ def draw3d():
             Canvas.SetLeft(t, q.X - 20)
             Canvas.SetTop(t, q.Y - 7)
             cv3.Children.Add(t)
+    _draw_cube(it, Wd)
+
+
+def _basis_of(it):
+    f = FACES_CFG.get(it['key'])
+    R, U, N = E.main_basis(f[0] if f else E.default_face(it['part']), int(f[1]) if f else 0)
+    if it['part'].get('rot180'):
+        fl = lambda v: (-v[0], -v[1], v[2])
+        R, U, N = fl(R), fl(U), fl(N)
+    return R, U, N
+
+
+def _draw_cube(it, Wd):
+    """Видовой куб (как в SolidWorks): крутится вместе с моделью; щелчок по грани / ребру / углу — точный вид
+    (6 + 12 + 8 направлений, стороны — относительно главного вида). db 30.10."""
+    R, U, N = _basis_of(it)
+    faces = [(N, R, U, u'Спереди'), (E.vmul(N, -1), E.vmul(R, -1), U, u'Сзади'), (R, E.vmul(N, -1), U, u'Справа'),
+             (E.vmul(R, -1), N, U, u'Слева'), (U, R, E.vmul(N, -1), u'Сверху'), (E.vmul(U, -1), R, N, u'Снизу')]
+    h = 26.0
+    ox, oy = Wd - 46.0, 46.0
+    RNG = {-1: (-1.0, -0.62), 0: (-0.62, 0.62), 1: (0.62, 1.0)}
+
+    def sp(p):
+        r = _proj(p)
+        return Point(ox + r[0] * h, oy + r[1] * h)
+    vis = sorted([fc for fc in faces if _facing(fc[0]) > 0.02], key=lambda fc: _facing(fc[0]))
+    for n, u, v, name in vis:
+        lit = 0.55 + 0.45 * _facing(n)
+        for i in (-1, 0, 1):
+            for j in (-1, 0, 1):
+                ru, rv = RNG[i], RNG[j]                  # центр грани широкий, рёбра и углы — узкие полоски
+                pts = [E.vadd(n, E.vmul(u, a), E.vmul(v, b)) for a, b in ((ru[0], rv[0]), (ru[1], rv[0]), (ru[1], rv[1]), (ru[0], rv[1]))]
+                pg = Polygon()
+                for q in pts:
+                    pg.Points.Add(sp(q))
+                base = (232, 240, 234) if (i == 0 and j == 0) else (214, 226, 218)
+                pg.Fill = _shade(base, lit, 255)
+                pg.Stroke, pg.StrokeThickness = B(u'#7A8A80'), 0.6
+                d = E.vadd(n, E.vmul(u, i), E.vmul(v, j))
+                kind = u'грань' if (i == 0 and j == 0) else (u'угол' if (i and j) else u'ребро')
+                pg.Tag = ('cube', d)
+                pg.Cursor = Cursors.Hand
+                pg.ToolTip = u'Видовой куб: %s — %s' % (kind, name)
+
+                def on_in(s_, e_, pg=pg):
+                    W['cube_hl'] = (pg, pg.Fill)
+                    pg.Fill = _shade(RGB_HL, 1.0, 255)
+
+                def on_out(s_, e_, pg=pg):
+                    hl = W.get('cube_hl')
+                    if hl and hl[0] is pg:
+                        pg.Fill = hl[1]
+                pg.MouseEnter += on_in
+                pg.MouseLeave += on_out
+                cv3.Children.Add(pg)
+        if _facing(n) > 0.35:
+            q = sp(n)
+            t = TextBlock()
+            t.Text, t.FontSize, t.Foreground, t.IsHitTestVisible = name, 8, B(u'#33413A'), False
+            Canvas.SetLeft(t, q.X - 15)
+            Canvas.SetTop(t, q.Y - 6)
+            cv3.Children.Add(t)
 
 
 def on3_down(s_, e_):
@@ -915,6 +978,9 @@ def on3_up(s_, e_):
         return                                   # тянули — поворот, не щелчок
     src = V3.get('src')
     i = getattr(src, 'Tag', None) if isinstance(src, Polygon) else None
+    if isinstance(i, tuple) and i and i[0] == 'cube':
+        set_cam(i[1])                            # видовой куб
+        return
     tags = W.get('tags') or []
     if not isinstance(i, int) or not (0 <= i < len(tags)):
         return
