@@ -16,6 +16,11 @@
      всё своё (сети, оборудование, марки, тексты) — вектором, связи — одной картинкой фоном.
      Снимки кешируются (%APPDATA%\XYZ_pdfsnap) и пересоздаются, только если изменились вид или файл связи.
      Если снимок не получился — этот лист растром 150 dpi (запасной путь).
+     Сетка листа не печатается: линии стилей из списка настройки (по умолчанию «db_Сетка листа»
+     и «db_Сетка листа_Красная»; файл xyz_settings.json в папке %APPDATA%/pyRevit, ключ pdf_hide_styles)
+     на время экспорта скрываются ТОЛЬКО на самих листах — виды на листах не трогаются,
+     поэтому те же или похожие стили на чертежах печатаются как обычно. Имя стиля — точное
+     совпадение (db 31.10.2026: поиск по слову «Невидим» убирал и нужные линии на чертежах).
      Остановить выгрузку: положить в папку выгрузки файл «СТОП» (любой, например СТОП.txt) —
      кнопка закончит текущий лист, откатит модель и остановится.
   3. В фоне (Python) доводит PDF: убирает повторно нарисованные линии, линии и заливки,
@@ -266,6 +271,60 @@ def prepare_views(sheets, flat):
     return n, nshade
 
 
+# Сетка листа: стили линий, которые на экране есть, а в PDF — нет. Только точные имена из настройки
+# pdf_hide_styles (xyz_settings.json), только линии самих листов (db 31.10.2026: прежний поиск по слову
+# «Невидим» скрывал и вспомогательные линии на видах чертежей).
+HIDE_STYLES_DEFAULT = [u'db_Сетка листа', u'db_Сетка листа_Красная']
+
+
+def hide_style_names():
+    try:
+        import xyz_settings
+        names = xyz_settings.get('pdf_hide_styles')
+        if names is None:
+            names = list(HIDE_STYLES_DEFAULT)
+            try:
+                xyz_settings.set('pdf_hide_styles', names)   # чтобы db видел ключ в файле и мог дополнить
+            except Exception:
+                pass
+    except Exception:
+        names = list(HIDE_STYLES_DEFAULT)
+    if isinstance(names, basestring):
+        names = [names]
+    return set((n or u'').strip() for n in names if (n or u'').strip())
+
+
+def guide_styles():
+    """Подкатегории «Линии» с ТОЧНЫМ именем из списка pdf_hide_styles."""
+    names = hide_style_names()
+    cat = doc.Settings.Categories.get_Item(DB.BuiltInCategory.OST_Lines)
+    res = []
+    for c in cat.SubCategories:
+        if (c.Name or u'') in names:
+            res.append(c.Id)
+    return res
+
+
+def hide_guides(sheets):
+    """Скрыть стили сетки листа на самих листах (не на видах; вызывать в откатываемой группе). Возвращает число листов."""
+    ids = guide_styles()
+    if not ids:
+        return 0
+    n = 0
+    for sh in sheets:
+        hit = False
+        for cid in ids:
+            try:
+                if sh.CanCategoryBeHidden(cid) and not sh.GetCategoryHidden(cid):
+                    sh.SetCategoryHidden(cid, True)
+                    hit = True
+            except Exception:
+                pass
+        if hit:
+            n += 1
+    return n
+
+
 def raster_visible(sheets):
     """Категория «Растровые изображения» видна на видах листов (иначе снимок подложки не печатается)."""
     rc = DB.ElementId(DB.BuiltInCategory.OST_RasterImages)
@@ -398,7 +457,9 @@ def main():
         t.Start()
         try:
             nviews, nshade = prepare_views(sheets, flat)
+            nguide = hide_guides(sheets)
             t.Commit()
+            log(u'сетка листа скрыта на листах: %d' % nguide)
         except Exception as ex:
             # транзакцию закрыть ДО отката группы — иначе Revit падает
             if t.GetStatus() == DB.TransactionStatus.Started:
