@@ -2,6 +2,8 @@
 
 🇷🇺 [Русская версия](README.md)
 
+📢 **Telegram:** [@xyz_for_revit](https://t.me/xyz_for_revit) — news, tips and button demos
+
 ![XYZ](docs/img/icons_bg/XYZ.png)
 
 MEP tools for Revit: tags, schematics, plenum families, fabrication sketches, schedules and sheet export. So that Revit routine doesn't spoil your mood, use XYZ.
@@ -85,3 +87,10 @@ Without them, sheets are exported by Revit as is, without optimisation.
 ## License
 
 [GPL-3.0](LICENSE). Some windows are based on [pyRevit](https://github.com/pyrevitlabs/pyRevit) forms (GPL-3.0).
+
+## Feedback
+
+Questions, bugs and ideas — in the comments under posts in the Telegram channel [@xyz_for_revit](https://t.me/xyz_for_revit) or in [Issues](https://github.com/Budzhak/XYZ/issues).
+
+> [!TIP]
+> When reporting a bug, please attach a screenshot and state your Revit (and pyRevit) version.

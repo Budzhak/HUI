@@ -2,6 +2,8 @@
 
 🇬🇧 [English version](README_en.md)
 
+📢 **Telegram:** [@xyz_for_revit](https://t.me/xyz_for_revit) — новости, советы и демонстрации кнопок
+
 > **EN:** pyRevit extension with MEP tools for Revit (tags, schematics, plenum families, ESKD sketches, schedules, sheet export). Russian and English UI.
 
 ![XYZ](docs/img/icons_bg/XYZ.png)
@@ -93,3 +95,10 @@ py -m pip install --user pikepdf shapely numpy
 ## Лицензия
 
 [GPL-3.0](LICENSE). Часть окон сделана на основе форм [pyRevit](https://github.com/pyrevitlabs/pyRevit) (GPL-3.0).
+
+## Обратная связь
+
+Вопросы, ошибки и идеи — в комментариях к постам Telegram-канала [@xyz_for_revit](https://t.me/xyz_for_revit) или в [Issues](https://github.com/Budzhak/XYZ/issues).
+
+> [!TIP]
+> Сообщая об ошибке, приложите скриншот и укажите версию Revit (и pyRevit).
